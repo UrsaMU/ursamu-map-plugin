@@ -1,19 +1,22 @@
-+MAP
++MAP / +MOVE
 
-Renders a procedural sector minimap centred on your coordinate. Authored
-**overlays** (buildings, caches, faction markers) draw on top of generated
-terrain. Use `+map/jump` to scout other sectors as a builder.
+Procedural sector map with vehicles, links, and spectate.
 
 SYNTAX
   +map[/<switch>] [<args>]
+  +move <dir>
 
 SWITCHES
-  /here              Centre the map on your current coord (default).
-  /jump <x> <y> [z]  Move your map cursor (builder+ only).
+  /here                 Render sector around your active entity (default).
+  /jump <x> <y> [z]     Admin: move active entity to coord.
+  /embark <target>      Board a map-capable vehicle in this room.
+  /disembark            Step out of a vehicle you are inside.
+  /launch               Take your vehicle onto the map.
+  /land                 Return your in-map vehicle to its dock.
+  /link <entityId>      Builder+: pilot an entity remotely.
+  /unlink               Stop remote piloting.
+  /spectate <entityId>  Admin: watch an entity's vision.
+  /unspectate           Admin: stop spectating.
+  /stats                Builder+: dump system stats.
 
-EXAMPLES
-  +map               Render the sector around you.
-  +map/here          Same as bare `+map`.
-  +map/jump 120 -40  Jump to (120, -40, 0).
-
-SEE ALSO: +help look
+DIRECTIONS: n s e w ne nw se sw u d (long forms ok)

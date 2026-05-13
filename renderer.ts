@@ -5,10 +5,15 @@ import type {
   RenderInput,
   RenderTile,
   TileOverlay,
+  VisibilityMask,
 } from "./schemas.ts";
-import { VIEWPORT_COLS } from "./schemas.ts";
+import { coordKey, VIEWPORT_COLS } from "./schemas.ts";
 
 const INFRA_KINDS = new Set(["infrastructure", "landmark", "hazard", "cache"]);
+// Fog defaults — legend.fog / legend.fogMemory are not threaded through
+// RenderInput yet; hardcode the schema defaults documented in MapLegend.
+const FOG_GLYPH = "?";
+const FOG_MEMORY_GLYPH = ".";
 
 const stripColor = (s: string): string => s.replace(/%c[a-z]/gi, "");
 const visibleLen = (s: string): number => stripColor(s).length;
@@ -76,15 +81,37 @@ function composeTopography(nb: NeighborhoodSample): string {
   return [self, ...frags].join(" ");
 }
 
-function buildMinimapLines(tiles: RenderTile[][]): string[] {
+function renderTileGlyph(
+  tile: RenderTile,
+  centre: { x: number; y: number; z: number },
+  visibility: VisibilityMask | undefined,
+): string {
+  if (!visibility) return tile.glyph;
+  const key = coordKey(tile.coord);
+  const isCentre = tile.coord.x === centre.x &&
+    tile.coord.y === centre.y && tile.coord.z === centre.z;
+  if (isCentre || visibility.live.has(key)) return tile.glyph;
+  const mem = visibility.memory.get(key);
+  const g = mem?.glyph ?? FOG_MEMORY_GLYPH;
+  if (mem) return `%cn${g}%cn`;
+  return `%cn${FOG_GLYPH}%cn`;
+}
+
+function buildMinimapLines(
+  tiles: RenderTile[][],
+  centre: { x: number; y: number; z: number },
+  visibility: VisibilityMask | undefined,
+): string[] {
   return tiles.map((row) => {
-    const cells = row.map((t) => `${t.glyph} `).join("");
+    const cells = row.map((t) =>
+      `${renderTileGlyph(t, centre, visibility)} `
+    ).join("");
     return " " + cells.replace(/ $/, "");
   });
 }
 
 function buildSplitBody(input: RenderInput): string[] {
-  const map = buildMinimapLines(input.tiles);
+  const map = buildMinimapLines(input.tiles, input.centre, input.visibility);
   const height = map.length;
   const mapW = map.length ? visibleLen(map[0]) : 0;
   const sepW = 3;
@@ -114,6 +141,8 @@ function buildInfrastructure(overlays: TileOverlay[]): string[] {
   return rows.length ? rows : ["  (none surveyed)"];
 }
 
+// Visibility contract: EntityMarkers lack coords, so upstream (format handler)
+// MUST filter entities outside `visibility.live` before constructing RenderInput.
 function buildContacts(entities: EntityMarker[]): string[] {
   const groups = new Map<string, { e: EntityMarker; n: number }>();
   for (const e of entities) {
@@ -148,6 +177,11 @@ export function renderMap(input: RenderInput): string {
   const stamp = rjust(`LOC: (${x}, ${y}) Z: ${z}`, VIEWPORT_COLS);
   const out: string[] = [];
   out.push(header(safeText(input.sectorTitle)));
+  if (input.spectator) {
+    const indicator = "%cy(SPECTATING)%cn";
+    const pad = Math.max(0, Math.floor((VIEWPORT_COLS - visibleLen(indicator)) / 2));
+    out.push(" ".repeat(pad) + indicator);
+  }
   out.push(stamp);
   out.push(...buildSplitBody(input));
   out.push(divider("NOTABLE INFRASTRUCTURE"));

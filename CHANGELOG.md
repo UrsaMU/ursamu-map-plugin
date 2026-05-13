@@ -3,6 +3,30 @@
 All notable changes to `@ursamu/map-plugin` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.0.0] - 2026-05-13
+
+### BREAKING
+
+- Players no longer carry `state.coord`. Map presence requires a `MapEntity` and either containment in a `MAP_CAPABLE` object or a `state.mapControlling` link.
+- DESCFORMAT handler no longer triggers for arbitrary objects with `state.coord`. It triggers only when the target is a `MapEntity.containerId` and the viewer has a resolvable active entity (or is an admin spectator).
+- `+map/jump` is now admin-only and operates on the caller's active entity, not the caller themselves.
+
+### Added
+
+- `MapEntity` model + `map.entities` DBO collection.
+- `+map/embark`, `+map/disembark`, `+map/launch`, `+map/land`, `+map/link`, `+map/unlink`, `+map/spectate`, `+map/unspectate`, `+map/stats` commands.
+- `+move` command (n/s/e/w/u/d/diagonals) that walks the caller's active entity.
+- Fog of war: live vision (Chebyshev), faction-shared union, explored memory (`map.fog` DBO), terrain occlusion (`BiomeDefinition.occludes`, `TileOverlay.occludes`).
+- `MAP_CAPABLE` object flag as the primary "passenger" gate.
+- `MapConfig.bounds` (optional hard XYZ bounds).
+- `TileOverlay.blocksMovement` for impassable authored tiles.
+
+### Security
+
+- New validateEntity invariants mirror validateOverlay (coord range, glyph length, no `[`/`]` in text, name/kind length caps, vision ≤ MAX_VISION).
+- `+map/jump`, `+map/spectate`, `+map/stats` gated by admin/wizard/superuser flag check inside exec (per catch-all switch pattern).
+- Off-map players see a hard-cordon error message ("You have no map presence"); admin spectate is the only override.
+
 ## [1.1.0] - 2026-05-13
 
 ### Changed

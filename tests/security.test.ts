@@ -3,8 +3,11 @@ import { assertEquals, assertExists } from "@std/assert";
 import { renderMap } from "../renderer.ts";
 import { getPlayerCoord, validateOverlay } from "../state.ts";
 import { parseCoord } from "../commands_internals.ts";
+import { validateEntity } from "../entities.ts";
+import { MAX_VISION } from "../schemas.ts";
 import type {
   Coord,
+  MapEntity,
   NeighborhoodSample,
   RenderInput,
   TopologySample,
@@ -118,4 +121,38 @@ Deno.test("L3: validateOverlay rejects bad payloads", OPTS, () => {
     validateOverlay({ key: "0,0,0", x: 0, y: 0, z: 0, name: "Bunker" }),
     true,
   );
+});
+
+const validEntity = (over: Partial<MapEntity> = {}): MapEntity => ({
+  id: "ent-1",
+  coord: { x: 0, y: 0, z: 0 },
+  glyph: "R",
+  kind: "vehicle",
+  name: "Recon Walker",
+  vision: 3,
+  ...over,
+});
+
+Deno.test("H2: validateEntity rejects [ or ] in name", OPTS, () => {
+  assertEquals(validateEntity(validEntity({ name: "[bad()]" })), false);
+});
+
+Deno.test("H2: validateEntity rejects [ or ] in status", OPTS, () => {
+  assertEquals(validateEntity(validEntity({ status: "[bad()]" })), false);
+});
+
+Deno.test("H2: validateEntity rejects [ or ] in kind", OPTS, () => {
+  assertEquals(validateEntity(validEntity({ kind: "[bad()]" })), false);
+});
+
+Deno.test("H2: validateEntity rejects [ or ] in factionId", OPTS, () => {
+  assertEquals(validateEntity(validEntity({ factionId: "[bad()]" })), false);
+});
+
+Deno.test("H2: validateEntity caps vision at MAX_VISION", OPTS, () => {
+  assertEquals(validateEntity(validEntity({ vision: MAX_VISION + 1 })), false);
+});
+
+Deno.test("H2: validateEntity rejects multi-char glyph", OPTS, () => {
+  assertEquals(validateEntity(validEntity({ glyph: "ab" })), false);
 });
