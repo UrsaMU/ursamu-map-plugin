@@ -1,5 +1,4 @@
-import { createNoise2D } from "simplex-noise";
-import alea from "alea";
+import { createNoise } from "ursamu";
 import type {
   BiomeDefinition,
   Coord,
@@ -30,9 +29,18 @@ const RING_OFFSETS: Array<{
   { k: "NW", dx: -1, dy: -1 },
 ];
 
+function hashSeed(seed: string): number {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h | 0;
+}
+
 function makeNoise(seed: string): Noise2D {
-  const prng = alea(seed);
-  return createNoise2D(prng);
+  const instance = createNoise(hashSeed(seed));
+  return (x, y) => instance.simplex2(x, y);
 }
 
 function sampleField(

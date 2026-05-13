@@ -3,6 +3,13 @@
 All notable changes to `@ursamu/map-plugin` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.1.0] - 2026-05-13
+
+### Changed
+
+- **Drop `npm:simplex-noise` and `npm:alea` dependencies.** Topology engine now uses `createNoise(seed)` from `ursamu` (added in 2.5.2), which exposes a per-instance `Noise` class with its own permutation table. String seeds are hashed FNV-1a to a 32-bit int before passing to `createNoise`. Snapshot fixture re-bootstrapped — terrain output is deterministic but differs numerically from the previous Alea-seeded build.
+- **Engine requirement bumped to `>=2.5.2`.** The plugin now has **zero npm dependencies** at the import-map level.
+
 ## [1.0.0] - 2026-05-13
 
 ### Added

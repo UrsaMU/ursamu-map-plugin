@@ -11,9 +11,7 @@
     "showcase": "deno run -A --unstable-kv tools/showcase.ts"
   },
   "imports": {
-    "ursamu": "jsr:@ursamu/ursamu",
-    "simplex-noise": "npm:simplex-noise@4.0.3",
-    "alea": "npm:alea@1.0.1",
+    "ursamu": "jsr:@ursamu/ursamu@^2.5.2",
     "@std/assert": "jsr:@std/assert@^1.0.0"
   },
   "lint": {

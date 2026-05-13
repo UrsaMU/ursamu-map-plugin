@@ -19,13 +19,13 @@ A procedural, coordinate-based sector map for UrsaMU — Simplex topology, spars
                           %chSECTOR 4A: JABIIM TRENCHES%cn                          
 ==============================================================================
                                                           LOC: (144, 219) Z: 0
- ~ t t t t ~ ~ t ~ ~ ~ t t t t | %chTOPOGRAPHY & CLIMATE%cn                         
- ~ , , t t t t t t ~ ~ ^ ~ t t | dense brush crowds the line of sight To the  
- , , , , t T T T + ~ ~ ^ ^ ~ t | north, grassland continues unbroken          
- , , , t ~ ~ T T # t ~ ^ ^ ~ t |                                              
- , , , ~ ~ ~ ~ t t ~ ~ ^ ^ ^ T |                                              
- , , , , ~ ~ t t t ^ ^ ^ ^ ^ ^ |                                              
- , , , , , ~ t t t ^ ^ ^ ^ ^ ^ |                                              
+ t ~ ~ ~ t t T ~ ~ ~ T T T T t | %chTOPOGRAPHY & CLIMATE%cn                         
+ t t t t t t t ~ ~ T T T T T t | dense brush crowds the line of sight To the  
+ t t t t t t t ~ + T T T T T ~ | north, open water stretches outward To the   
+ t t t t t t t T # T T T T T t | west, the plain runs out toward the horizon  
+ t ~ = t t t t ~ ~ ~ ~ ~ T T t |                                              
+ = = = t t t t t ~ ~ ~ T T T T |                                              
+ . = = t t t t t t ~ ~ ~ T T t |                                              
 
 %chNOTABLE INFRASTRUCTURE%cn
 ------------------------------------------------------------------------------
@@ -40,7 +40,7 @@ A procedural, coordinate-based sector map for UrsaMU — Simplex topology, spars
 
 %chADJACENT SECTORS%cn
 ------------------------------------------------------------------------------
-  N (Plains), S (Brush), E (Plains), W (Brush)
+  N (Deep Water), S (Deep Water), E (Brush), W (Plains)
 ==============================================================================
 ```
 
@@ -180,7 +180,7 @@ ursamu-map-plugin/
 
 ## Compatibility
 
-UrsaMU **>= 2.3.0**. The plugin imports `header`, `divider`, `footer`, and `registerFormatHandler` / `unregisterFormatHandler` — all of which require the 2.3.0 native-UI + format-handler API.
+UrsaMU **>= 2.5.2**. The plugin imports `createNoise` (per-instance `Noise` class) added in 2.5.2, plus `header` / `divider` / `footer` and `registerFormatHandler` / `unregisterFormatHandler` from 2.3.0. **Zero npm dependencies** — all noise + PRNG comes from the engine.
 
 ## Roadmap
 
