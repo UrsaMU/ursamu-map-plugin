@@ -4,6 +4,34 @@ All notable changes to `@ursamu/map-plugin` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 
+## [3.0.0] - 2026-05-14
+
+The platform release. Closes [#2](https://github.com/UrsaMU/ursamu-map-plugin/issues/2) — turns the plugin from "one infinite grid" into a host for many themed maps with movement, region metadata, REST, and pluggable extension points.
+
+### Added
+
+- **§1 Realm / map-id scoping.** Optional `realm: string` on `Coord` and `TileOverlay`. `coordKey` now produces `"realm:x,y,z"`. Two overlays at the same `(x,y,z)` in different realms coexist. Header shows `[Realm: <name>]` when non-default. Exports `DEFAULT_REALM`, `realmOf()`.
+- **§2 Per-realm `MapConfig` registry.** `registerMapConfig(realmId, cfg)` / `unregisterMapConfig(realmId)` / `getMapConfig(realmId)`. `getTopologyEngine(realmId)` caches a `TopologyEngine` per realm. Siblings ship Star Wars / Shadowrun / D&D biome sets side-by-side.
+- **§3 `moveCoord` + move-guard registry.** `moveCoord(u, playerId, from, deltaOrCoord, opts?)` resolves cost, honors `BiomeDefinition.traversal === "impassable"` and `overlay.blocksMovement`, runs registered guards, emits `map:player:moved` / `map:player:blocked`. `registerMoveGuard(fn)` / `unregisterMoveGuard(fn)` with first-veto-wins semantics. Direction constants `N`, `NE`, `E`, `SE`, `S`, `SW`, `W`, `NW`. `runMoveGuards(ctx)` exposed so the +move command also runs the guard chain.
+- **§4 Pathfinding primitives.** `getTraversalCost(from, to, opts?)` and `findPath(from, to, opts?)` (A*). Honors overlays, `avoid(coord)` filter, `maxCost` / `maxIterations` caps, configurable diagonals.
+- **§5 REST surface.** Bearer-authenticated routes under `/api/v1/map/`: `GET /realm/:id/render?center=x,y&radius=N`, `GET /player/:id`, `POST /overlay`, `DELETE /overlay`. 401-before-work on every route; overlay writes are admin-only. Render route output has parity with the in-game renderer.
+- **§6 Render extension points.** `registerRenderLayer(name, fn)` paints additional tiles in registration order (later wins). `registerInfoLine(fn)` appends to a new "INTEL" section below "ADJACENT SECTORS". Each provider is sandboxed — a throw is logged and skipped.
+- **§7 Nested region metadata.** `MapConfig.regions: Region[]` with `parent`, `tags`, free-form `metadata`. `getRegion(cfg, coord)` returns the deepest match; `getRegionPath` returns the deepest-to-outermost chain. Renderer header shows "City — Country — Continent". Legacy `MapConfig.sectors` auto-converts.
+- **V3 migration helper.** `migrateToV3()` (and `migrateOverlayKeys` / `migrateFogKeys`) rewrites pre-v3 `"x,y,z"` DBO ids/keys into the new `"realm:x,y,z"` form. Idempotent.
+
+### Changed
+
+- **BREAKING:** `coordKey` format changed to `"realm:x,y,z"`. Existing data is still readable via `realmOf()` defaulting to `"default"`, but the stored `id` / `key` on TileOverlay and FogRecord rows is stale. Run `migrateToV3()` once after upgrade.
+- `FogRecord` gained optional `realm`. Pre-v3 rows render under `"default"`.
+- The `+map/jump` help reflects the optional `[realm]` token.
+- `+move` now runs the move-guard chain before `moveEntity`, so siblings' registered guards veto entity moves with a reason.
+
+### Notes
+
+- Tests: 126 passed at v3.0.0 cut.
+- Co-existing PRs that touched format.ts / index.ts were rebased serially; final merge order is preserved in git history.
+
+
 ## [2.1.1] - 2026-05-13
 
 ### Security
