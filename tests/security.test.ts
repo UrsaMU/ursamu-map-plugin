@@ -156,3 +156,94 @@ Deno.test("H2: validateEntity caps vision at MAX_VISION", OPTS, () => {
 Deno.test("H2: validateEntity rejects multi-char glyph", OPTS, () => {
   assertEquals(validateEntity(validEntity({ glyph: "ab" })), false);
 });
+
+// ─── H1: pilot authorization on launch / move / land ─────────────────────────
+
+import {
+  canPilot,
+  canClaimEntity,
+  isInBounds,
+  validateCoord,
+} from "../commands_internals.ts";
+
+const mockActor = (id: string, flags: string[] = []) => ({
+  id,
+  flags: { has: (f: string) => flags.includes(f) },
+});
+
+Deno.test("H1: passenger cannot pilot vehicle they don't own", OPTS, () => {
+  const passenger = mockActor("#100");
+  const vehicle = { id: "#42", owner: "#7" };
+  assertEquals(canPilot(passenger, vehicle), false);
+});
+
+Deno.test("H1: owner can pilot their own vehicle", OPTS, () => {
+  const owner = mockActor("#7");
+  const vehicle = { id: "#42", owner: "#7" };
+  assertEquals(canPilot(owner, vehicle), true);
+});
+
+Deno.test("H1: admin can pilot any vehicle", OPTS, () => {
+  const admin = mockActor("#1", ["admin"]);
+  const vehicle = { id: "#42", owner: "#7" };
+  assertEquals(canPilot(admin, vehicle), true);
+});
+
+Deno.test("H1: ownerless vehicle is not pilotable by non-admin", OPTS, () => {
+  const player = mockActor("#100");
+  const vehicle = { id: "#42" };
+  assertEquals(canPilot(player, vehicle), false);
+});
+
+// ─── H2: entity claim authorization ──────────────────────────────────────────
+
+Deno.test("H2: builder cannot claim an unowned entity", OPTS, () => {
+  const builder = mockActor("#100", ["builder"]);
+  const entity = { controllerId: undefined };
+  assertEquals(canClaimEntity(builder, entity), false);
+});
+
+Deno.test("H2: admin can claim any entity", OPTS, () => {
+  const admin = mockActor("#1", ["wizard"]);
+  const entity = { controllerId: undefined };
+  assertEquals(canClaimEntity(admin, entity), true);
+});
+
+Deno.test("H2: existing controller can re-claim their own entity", OPTS, () => {
+  const owner = mockActor("#100");
+  const entity = { controllerId: "#100" };
+  assertEquals(canClaimEntity(owner, entity), true);
+});
+
+Deno.test("H2: non-admin builder cannot steal entity from another controller", OPTS, () => {
+  const thief = mockActor("#101", ["builder"]);
+  const entity = { controllerId: "#100" };
+  assertEquals(canClaimEntity(thief, entity), false);
+});
+
+// ─── M2: bounds enforcement on movement + launch ──────────────────────────────
+
+Deno.test("M2: isInBounds returns true when no bounds", OPTS, () => {
+  assertEquals(isInBounds({ x: 1e6, y: 1e6, z: 0 }), true);
+});
+
+Deno.test("M2: isInBounds rejects out-of-bounds coord", OPTS, () => {
+  const bounds = { min: { x: 0, y: 0, z: 0 }, max: { x: 100, y: 100, z: 0 } };
+  assertEquals(isInBounds({ x: 101, y: 50, z: 0 }, bounds), false);
+  assertEquals(isInBounds({ x: -1, y: 50, z: 0 }, bounds), false);
+  assertEquals(isInBounds({ x: 50, y: 50, z: 0 }, bounds), true);
+});
+
+// ─── M3: launch coord validation ──────────────────────────────────────────────
+
+Deno.test("M3: validateCoord rejects non-integer + out-of-range + bounds", OPTS, () => {
+  assertEquals(validateCoord({ x: 1.5, y: 0, z: 0 }), null);
+  assertEquals(validateCoord({ x: 1e20, y: 0, z: 0 }), null);
+  assertEquals(validateCoord({ x: "10", y: 0, z: 0 }), null);
+  assertEquals(validateCoord(null), null);
+  assertEquals(validateCoord({ x: 5, y: 5, z: 0 }), { x: 5, y: 5, z: 0 });
+
+  const bounds = { min: { x: 0, y: 0, z: 0 }, max: { x: 10, y: 10, z: 0 } };
+  assertEquals(validateCoord({ x: 11, y: 0, z: 0 }, bounds), null);
+  assertEquals(validateCoord({ x: 5, y: 5, z: 0 }, bounds), { x: 5, y: 5, z: 0 });
+});

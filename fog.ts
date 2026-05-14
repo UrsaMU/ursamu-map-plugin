@@ -2,6 +2,7 @@ import { DBO } from "ursamu";
 import {
   type Coord,
   coordKey,
+  DEFAULT_MEMORY_TTL_SECONDS,
   FOG_COLLECTION,
   type FogRecord,
   type MapEntity,
@@ -138,11 +139,44 @@ const stripId = (rec: StoredFog): FogRecord => {
   return rest;
 };
 
+/**
+ * Read all memory records for an owner. Records older than `ttlSeconds`
+ * (default `DEFAULT_MEMORY_TTL_SECONDS`) are filtered out — they're considered
+ * stale and rendered as fully unseen. Pass `ttlSeconds: Infinity` to disable
+ * filtering for diagnostics.
+ */
 export const getMemoryForOwner = async (
   ownerId: string,
+  ttlSeconds: number = DEFAULT_MEMORY_TTL_SECONDS,
 ): Promise<FogRecord[]> => {
+  const cutoff = Number.isFinite(ttlSeconds)
+    ? Date.now() - ttlSeconds * 1000
+    : Number.NEGATIVE_INFINITY;
   const all = await fog.all();
-  return all.filter((r) => r.ownerId === ownerId).map(stripId);
+  return all
+    .filter((r) => r.ownerId === ownerId && r.lastSeenAt >= cutoff)
+    .map(stripId);
+};
+
+/**
+ * Prune memory records older than ttl. Callers should run this periodically
+ * (e.g., on a cron `gameHooks` event) to bound DBO growth. Returns count
+ * deleted.
+ */
+export const pruneStaleMemory = async (
+  ttlSeconds: number = DEFAULT_MEMORY_TTL_SECONDS,
+): Promise<number> => {
+  if (!Number.isFinite(ttlSeconds)) return 0;
+  const cutoff = Date.now() - ttlSeconds * 1000;
+  const all = await fog.all();
+  let n = 0;
+  for (const r of all) {
+    if (r.lastSeenAt < cutoff) {
+      await fog.delete({ id: r.id });
+      n += 1;
+    }
+  }
+  return n;
 };
 
 export const writeMemoryBatch = async (

@@ -26,7 +26,14 @@ import {
   moveEntity,
   setEntity,
 } from "./entities.ts";
-import { parseCoord } from "./commands_internals.ts";
+import {
+  canClaimEntity,
+  canPilot,
+  isInBounds,
+  parseCoord,
+  validateCoord,
+} from "./commands_internals.ts";
+import { defaultMapConfig } from "./config.default.ts";
 
 const HELP = `+map[/<switch>] [<args>]  — Procedural sector map & movement.
 
@@ -152,8 +159,17 @@ async function handleLaunch(u: IUrsamuSDK): Promise<void> {
     u.send("%crYou are not inside a map-capable vehicle.%cn");
     return;
   }
+  if (!canPilot(u.me, container as unknown as { id: string; owner?: string })) {
+    u.send("%crPermission denied — only the vehicle owner can launch.%cn");
+    return;
+  }
   const cstate = container.state ?? {};
-  const coord = (cstate.coord as Coord | undefined) ?? { x: 0, y: 0, z: 0 };
+  const rawCoord = cstate.coord ?? { x: 0, y: 0, z: 0 };
+  const coord = validateCoord(rawCoord, defaultMapConfig.bounds);
+  if (!coord) {
+    u.send("%crLaunch failed: vehicle has invalid or out-of-bounds state.coord.%cn");
+    return;
+  }
   const entityId = `entity-${container.id}-${Date.now()}`;
   await setEntity({
     id: entityId,
@@ -176,6 +192,16 @@ async function handleLand(u: IUrsamuSDK): Promise<void> {
   const active = await getActiveEntity(u);
   if (!active || active.mode !== "container") {
     u.send("%crYou are not piloting an in-map vehicle.%cn");
+    return;
+  }
+  const containerForAuth = active.entity.containerId
+    ? await lookup(u, active.entity.containerId)
+    : null;
+  if (
+    containerForAuth &&
+    !canPilot(u.me, containerForAuth as unknown as { id: string; owner?: string })
+  ) {
+    u.send("%crPermission denied — only the vehicle owner can land.%cn");
     return;
   }
   const ov = await getOverlay(active.entity.coord);
@@ -218,6 +244,12 @@ async function handleLink(u: IUrsamuSDK, id: string): Promise<void> {
   }
   if (entity.controllerId && entity.controllerId !== u.me.id) {
     u.send("%crEntity already has a controller.%cn");
+    return;
+  }
+  if (!canClaimEntity(u.me, entity)) {
+    u.send(
+      "%crPermission denied — initial entity claim is admin-only.%cn",
+    );
     return;
   }
   if (!entity.controllerId) {
@@ -322,6 +354,10 @@ addCmd({
     }
     const cur = active.entity.coord;
     const dest: Coord = { x: cur.x + dir.dx, y: cur.y + dir.dy, z: cur.z };
+    if (!isInBounds(dest, defaultMapConfig.bounds)) {
+      u.send(`%crCannot move ${raw}: out of bounds.%cn`);
+      return;
+    }
     const ov = await getOverlay(dest);
     if (ov?.blocksMovement === true) {
       u.send(`%crCannot move ${raw}: tile blocks movement.%cn`);
