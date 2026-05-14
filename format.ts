@@ -9,6 +9,7 @@ import {
   DEFAULT_REALM,
   type EntityMarker,
   isEntityVisibleTo,
+  type MapConfig,
   type MapEntity,
   realmOf,
   type RenderInput,
@@ -17,8 +18,7 @@ import {
 } from "./schemas.ts";
 
 import { canViewSubject } from "./commands_internals.ts";
-import { defaultMapConfig } from "./config.default.ts";
-import { createTopologyEngine } from "./topology.ts";
+import { getMapConfig, getTopologyEngine } from "./mapconfig.ts";
 import { getOverlay, getOverlaysInRegion } from "./state.ts";
 import {
   getActiveEntity,
@@ -43,7 +43,7 @@ import {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-type Topo = ReturnType<typeof createTopologyEngine>;
+type Topo = ReturnType<typeof getTopologyEngine>;
 
 const ownerKey = (e: MapEntity): string =>
   e.factionId ?? e.controllerId ?? e.id;
@@ -74,7 +74,7 @@ function buildTiles(
   return grid;
 }
 
-function cfgSectorName(cfg: typeof defaultMapConfig, c: Coord): string | null {
+function cfgSectorName(cfg: MapConfig, c: Coord): string | null {
   if (!cfg.sectors) return null;
   for (const slug of Object.keys(cfg.sectors)) {
     const { name, aabb } = cfg.sectors[slug];
@@ -134,15 +134,15 @@ export const descFormatHandler: FormatHandler = async (
   if (!active) return null;
   if (!canViewSubject(active, subject)) return null;
 
-  const cfg = defaultMapConfig;
+  const centre = subject.coord;
+  const realm = realmOf(centre);
+  const cfg = getMapConfig(realm);
   const w = cfg.viewportWidth ?? DEFAULT_MINIMAP_W;
   const h = cfg.viewportHeight ?? DEFAULT_MINIMAP_H;
   const halfW = Math.floor(w / 2);
   const halfH = Math.floor(h / 2);
-  const centre = subject.coord;
 
-  const topo = createTopologyEngine(cfg);
-  const realm = realmOf(centre);
+  const topo = getTopologyEngine(realm);
   const min: Coord = { x: centre.x - halfW, y: centre.y - halfH, z: centre.z };
   const max: Coord = { x: centre.x + halfW, y: centre.y + halfH, z: centre.z };
   if (realm !== DEFAULT_REALM) {

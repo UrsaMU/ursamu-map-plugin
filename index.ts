@@ -43,6 +43,14 @@ export {
   unregisterRenderLayer,
 } from "./extensions.ts";
 
+export {
+  getMapConfig,
+  getTopologyEngine,
+  listRegisteredRealms,
+  registerMapConfig,
+  unregisterMapConfig,
+} from "./mapconfig.ts";
+
 const PRUNE_INTERVAL_MS = 15 * 60 * 1000;
 
 let pruneTimer: number | undefined;
