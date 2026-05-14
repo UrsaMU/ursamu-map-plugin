@@ -6,6 +6,8 @@ import type { Coord, MapBounds, MapEntity } from "./schemas.ts";
 const COORD_MAX = 1_000_000;
 const ADMIN_FLAGS = ["admin", "wizard", "superuser"];
 
+const REALM_RE = /^[A-Za-z0-9_-]{1,32}$/;
+
 export function parseCoord(raw: string): Coord | null {
   const parts = raw.split(/\s+/).filter(Boolean);
   if (parts.length < 2) return null;
@@ -17,9 +19,31 @@ export function parseCoord(raw: string): Coord | null {
   };
   const x = parseOne(parts[0]);
   const y = parseOne(parts[1]);
-  const z = parts.length >= 3 ? parseOne(parts[2]) : 0;
-  if (x === null || y === null || z === null) return null;
-  return { x, y, z };
+  // Optional Z then optional realm. If parts[2] is non-numeric and looks like
+  // a realm slug, treat it as the realm and default Z to 0. Otherwise parts[2]
+  // is Z and parts[3] (if any) is realm.
+  let z = 0;
+  let realm: string | undefined;
+  if (parts.length === 3) {
+    if (/^-?\d+$/.test(parts[2])) {
+      const parsed = parseOne(parts[2]);
+      if (parsed === null) return null;
+      z = parsed;
+    } else {
+      if (!REALM_RE.test(parts[2])) return null;
+      realm = parts[2];
+    }
+  } else if (parts.length >= 4) {
+    const parsed = parseOne(parts[2]);
+    if (parsed === null) return null;
+    z = parsed;
+    if (!REALM_RE.test(parts[3])) return null;
+    realm = parts[3];
+  }
+  if (x === null || y === null) return null;
+  const out: Coord = { x, y, z };
+  if (realm !== undefined) out.realm = realm;
+  return out;
 }
 
 // ─── Auth predicates ──────────────────────────────────────────────────────────
@@ -132,6 +156,12 @@ export function validateCoord(coord: unknown, bounds?: MapBounds): Coord | null 
     typeof n === "number" && Number.isInteger(n) && Math.abs(n) <= COORD_MAX;
   if (!ok(x) || !ok(y) || !ok(z)) return null;
   const c: Coord = { x, y, z };
+  const realm = (coord as Record<string, unknown>).realm;
+  if (realm !== undefined) {
+    if (typeof realm !== "string" || realm.length === 0 || realm.length > 32) return null;
+    if (!/^[A-Za-z0-9_-]+$/.test(realm)) return null;
+    c.realm = realm;
+  }
   if (!isInBounds(c, bounds)) return null;
   return c;
 }

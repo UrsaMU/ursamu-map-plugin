@@ -6,9 +6,11 @@ import {
   coordKey,
   DEFAULT_MINIMAP_H,
   DEFAULT_MINIMAP_W,
+  DEFAULT_REALM,
   type EntityMarker,
   isEntityVisibleTo,
   type MapEntity,
+  realmOf,
   type RenderInput,
   type RenderTile,
   type TileOverlay,
@@ -44,8 +46,11 @@ const ownerKey = (e: MapEntity): string =>
 function buildTiles(
   centre: Coord, w: number, h: number, overlays: TileOverlay[], topo: Topo,
 ): RenderTile[][] {
+  const realm = realmOf(centre);
   const lookup = new Map<string, TileOverlay>();
-  for (const o of overlays) lookup.set(coordKey({ x: o.x, y: o.y, z: o.z }), o);
+  for (const o of overlays) {
+    lookup.set(coordKey({ x: o.x, y: o.y, z: o.z, realm: realmOf(o) }), o);
+  }
   const halfW = Math.floor(w / 2), halfH = Math.floor(h / 2);
   const grid: RenderTile[][] = [];
   for (let row = 0; row < h; row++) {
@@ -53,6 +58,7 @@ function buildTiles(
     const y = centre.y + (halfH - row);
     for (let col = 0; col < w; col++) {
       const coord: Coord = { x: centre.x + (col - halfW), y, z: centre.z };
+      if (realm !== DEFAULT_REALM) coord.realm = realm;
       const ov = lookup.get(coordKey(coord));
       line.push(ov?.glyph
         ? { coord, glyph: ov.glyph, authored: true }
@@ -131,8 +137,13 @@ export const descFormatHandler: FormatHandler = async (
   const centre = subject.coord;
 
   const topo = createTopologyEngine(cfg);
+  const realm = realmOf(centre);
   const min: Coord = { x: centre.x - halfW, y: centre.y - halfH, z: centre.z };
   const max: Coord = { x: centre.x + halfW, y: centre.y + halfH, z: centre.z };
+  if (realm !== DEFAULT_REALM) {
+    min.realm = realm;
+    max.realm = realm;
+  }
   const regionOverlays = await getOverlaysInRegion(min, max);
   const centreOverlay = await getOverlay(centre);
   const merged = centreOverlay
@@ -158,13 +169,20 @@ export const descFormatHandler: FormatHandler = async (
   const now = Date.now();
   const updates = [];
   for (const k of live) {
-    const [xs, ys, zs] = k.split(",");
+    const colon = k.indexOf(":");
+    const raw = colon >= 0 ? k.slice(colon + 1) : k;
+    const [xs, ys, zs] = raw.split(",");
     const c: Coord = { x: Number(xs), y: Number(ys), z: Number(zs) };
+    if (realm !== DEFAULT_REALM) c.realm = realm;
     const glyph = tileGlyphAt(c, tiles, centre, w, h);
     if (!glyph) continue;
-    const ov = merged.find((o) => o.x === c.x && o.y === c.y && o.z === c.z);
+    const ov = merged.find((o) =>
+      o.x === c.x && o.y === c.y && o.z === c.z && realmOf(o) === realm
+    );
     updates.push({
-      key: `${owner}|${k}`, ownerId: owner, x: c.x, y: c.y, z: c.z,
+      key: `${owner}|${k}`, ownerId: owner,
+      realm: realm !== DEFAULT_REALM ? realm : undefined,
+      x: c.x, y: c.y, z: c.z,
       glyph, kind: ov?.kind, name: ov?.name, lastSeenAt: now,
     });
   }
@@ -173,9 +191,12 @@ export const descFormatHandler: FormatHandler = async (
   const pool = await getEntitiesInRegion(min, max);
   const entities = filterEntityMarkers(pool, live, subject);
 
-  const sectorTitle = centreOverlay?.name ??
+  const baseTitle = centreOverlay?.name ??
     cfgSectorName(cfg, centre) ??
     `Sector ${centre.x},${centre.y},${centre.z}`;
+  const sectorTitle = realm !== DEFAULT_REALM
+    ? `[Realm: ${realm}] ${baseTitle}`
+    : baseTitle;
 
   const input: RenderInput = {
     sectorTitle,

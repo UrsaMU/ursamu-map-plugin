@@ -4,6 +4,7 @@ import {
   type Coord,
   coordKey,
   OVERLAY_COLLECTION,
+  realmOf,
   type TileOverlay,
 } from "./schemas.ts";
 
@@ -37,9 +38,11 @@ export const getOverlaysInRegion = async (
   if (span > REGION_MAX_TILES) {
     throw new Error("getOverlaysInRegion: region too large");
   }
+  const realm = realmOf(min);
   const all = await overlays.all();
   return all
     .filter((o) =>
+      realmOf(o) === realm &&
       o.x >= xLo && o.x <= xHi &&
       o.y >= yLo && o.y <= yHi &&
       o.z >= zLo && o.z <= zHi
@@ -53,8 +56,9 @@ export const setOverlay = async (overlay: TileOverlay): Promise<void> => {
   if (!validateOverlay(overlay)) {
     throw new Error("setOverlay: invalid overlay payload");
   }
-  const key = coordKey({ x: overlay.x, y: overlay.y, z: overlay.z });
-  const record: StoredOverlay = { ...overlay, key, id: key };
+  const realm = realmOf(overlay);
+  const key = coordKey({ x: overlay.x, y: overlay.y, z: overlay.z, realm });
+  const record: StoredOverlay = { ...overlay, realm, key, id: key };
   await overlays.update({ id: key }, record);
 };
 
@@ -71,20 +75,29 @@ export const getPlayerCoord = (
 ): Coord | null => {
   const coord = playerState?.coord;
   if (!coord || typeof coord !== "object") return null;
-  const { x, y, z } = coord as Record<string, unknown>;
+  const { x, y, z, realm } = coord as Record<string, unknown>;
   if (!isFiniteNumber(x) || !isFiniteNumber(y) || !isFiniteNumber(z)) {
     return null;
   }
-  return { x, y, z };
+  const out: Coord = { x, y, z };
+  if (typeof realm === "string" && realm.length > 0) out.realm = realm;
+  return out;
 };
 
 const COORD_MAX = 1_000_000;
 const NAME_MAX = 80;
 
+const REALM_MAX = 32;
+const REALM_RE = /^[A-Za-z0-9_-]+$/;
+
 export const validateOverlay = (o: TileOverlay): boolean => {
   if (!Number.isInteger(o.x) || Math.abs(o.x) > COORD_MAX) return false;
   if (!Number.isInteger(o.y) || Math.abs(o.y) > COORD_MAX) return false;
   if (!Number.isInteger(o.z) || Math.abs(o.z) > COORD_MAX) return false;
+  if (o.realm !== undefined) {
+    if (typeof o.realm !== "string" || o.realm.length === 0 || o.realm.length > REALM_MAX) return false;
+    if (!REALM_RE.test(o.realm)) return false;
+  }
   const checkStr = (s: string | undefined, max: number) => {
     if (s === undefined) return true;
     if (typeof s !== "string" || s.length > max) return false;
@@ -108,5 +121,10 @@ export const setPlayerCoord = async (
   playerId: string,
   coord: Coord,
 ): Promise<void> => {
-  await u.db.modify(playerId, "$set", { "data.coord": coord });
+  const stored: Coord = { x: coord.x, y: coord.y, z: coord.z };
+  if (coord.realm !== undefined && coord.realm.length > 0) stored.realm = coord.realm;
+  await u.db.modify(playerId, "$set", { "data.coord": stored });
 };
+
+/** Re-exported so REALM is queryable from peer modules without re-deriving. */
+export { realmOf };

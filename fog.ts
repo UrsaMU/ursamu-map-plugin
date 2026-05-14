@@ -21,7 +21,9 @@ export function buildOcclusionLookup(
   overlays: TileOverlay[],
 ): OcclusionLookup {
   const overlayByKey = new Map<string, TileOverlay>();
-  for (const o of overlays) overlayByKey.set(o.key, o);
+  for (const o of overlays) {
+    overlayByKey.set(coordKey({ x: o.x, y: o.y, z: o.z, realm: o.realm }), o);
+  }
   const cache = new Map<string, number>();
   return (coord: Coord): number => {
     const key = coordKey(coord);
@@ -138,7 +140,7 @@ export function buildVisibilityMask(
 ): VisibilityMask {
   const mem = new Map<string, FogRecord>();
   for (const rec of memory) {
-    const key = coordKey({ x: rec.x, y: rec.y, z: rec.z });
+    const key = coordKey({ x: rec.x, y: rec.y, z: rec.z, realm: rec.realm });
     if (live.has(key)) continue;
     const prior = mem.get(key);
     if (!prior || prior.lastSeenAt < rec.lastSeenAt) mem.set(key, rec);

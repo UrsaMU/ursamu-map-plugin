@@ -41,7 +41,7 @@ const HELP = `+map[/<switch>] [<args>]  — Procedural sector map & movement.
 
 Switches:
   /here                 Render the sector around your active entity (default).
-  /jump <x> <y> [z]     Admin: move your active entity to a coord.
+  /jump <x> <y> [z] [realm]  Admin: move your active entity to a coord.
   /embark <target>      Board a map-capable vehicle in your room.
   /disembark            Step out of the vehicle you are inside.
   /launch               Take the vehicle you are in onto the map.
@@ -103,7 +103,7 @@ async function handleJump(u: IUrsamuSDK, rest: string): Promise<void> {
   }
   const coord = parseCoord(rest);
   if (!coord) {
-    u.send("Usage: +map/jump <x> <y> [z]");
+    u.send("Usage: +map/jump <x> <y> [z] [realm]");
     return;
   }
   const active = await getActiveEntity(u);
@@ -356,6 +356,7 @@ addCmd({
     }
     const cur = active.entity.coord;
     const dest: Coord = { x: cur.x + dir.dx, y: cur.y + dir.dy, z: cur.z };
+    if (cur.realm !== undefined) dest.realm = cur.realm;
     if (!isInBounds(dest, defaultMapConfig.bounds)) {
       u.send(`%crCannot move ${raw}: out of bounds.%cn`);
       return;

@@ -8,9 +8,21 @@ export interface Coord {
   x: number;
   y: number;
   z: number;
+  /** Logical map id. Absent / empty means {@link DEFAULT_REALM}. */
+  realm?: string;
 }
 
-export const coordKey = (c: Coord): string => `${c.x},${c.y},${c.z}`;
+/** Sentinel for coords with no explicit realm. */
+export const DEFAULT_REALM = "default";
+
+/** Returns the realm of a coord, normalizing missing/empty to {@link DEFAULT_REALM}. */
+export const realmOf = (c: Pick<Coord, "realm">): string => {
+  const r = c.realm;
+  return typeof r === "string" && r.length > 0 ? r : DEFAULT_REALM;
+};
+
+export const coordKey = (c: Coord): string =>
+  `${realmOf(c)}:${c.x},${c.y},${c.z}`;
 
 // ─── Biome & legend ───────────────────────────────────────────────────────────
 
@@ -115,11 +127,13 @@ export interface MapBounds {
  * "use the topology engine".
  */
 export interface TileOverlay {
-  /** Composite key `${x},${y},${z}` — also persisted as separate fields. */
+  /** Composite key `${realm}:${x},${y},${z}` — also persisted as separate fields. */
   key: string;
   x: number;
   y: number;
   z: number;
+  /** Realm this overlay belongs to. Absent/empty → {@link DEFAULT_REALM}. */
+  realm?: string;
   /** Overrides the procedural biome glyph if set. */
   glyph?: Glyph;
   /** Overrides the procedural biome id if set. */
@@ -241,10 +255,12 @@ export const ENTITY_COLLECTION = "map.entities";
  * live-visible set.
  */
 export interface FogRecord {
-  /** Composite key `${ownerId}|${x},${y},${z}`. */
+  /** Composite key `${ownerId}|${realm}:${x},${y},${z}`. */
   key: string;
   /** factionId or controllerId — whatever owns this memory. */
   ownerId: string;
+  /** Realm this memory belongs to. Absent → {@link DEFAULT_REALM}. */
+  realm?: string;
   x: number;
   y: number;
   z: number;

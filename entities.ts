@@ -7,6 +7,7 @@ import {
   MAP_CAPABLE_FLAG,
   type MapEntity,
   MAX_VISION,
+  realmOf,
   SPECTATING_STATE_FIELD,
 } from "./schemas.ts";
 
@@ -39,6 +40,11 @@ export const validateEntity = (e: MapEntity): boolean => {
   if (!Number.isInteger(x) || Math.abs(x) > COORD_MAX) return false;
   if (!Number.isInteger(y) || Math.abs(y) > COORD_MAX) return false;
   if (!Number.isInteger(z) || Math.abs(z) > COORD_MAX) return false;
+  if (e.coord.realm !== undefined) {
+    const r = e.coord.realm;
+    if (typeof r !== "string" || r.length === 0 || r.length > 32) return false;
+    if (!/^[A-Za-z0-9_-]+$/.test(r)) return false;
+  }
   if (typeof e.glyph !== "string" || e.glyph.length !== 1) return false;
   if (e.glyph.charCodeAt(0) > 0xff) return false;
   if (typeof e.kind !== "string" || e.kind.length === 0 || e.kind.length > KIND_MAX) {
@@ -121,9 +127,11 @@ export const getEntitiesInRegion = async (
   if (span > REGION_MAX_TILES) {
     throw new Error("getEntitiesInRegion: region too large");
   }
+  const realm = realmOf(min);
   const all = await entities.all();
   return all
     .filter((e) =>
+      realmOf(e.coord) === realm &&
       e.coord.x >= xLo && e.coord.x <= xHi &&
       e.coord.y >= yLo && e.coord.y <= yHi &&
       e.coord.z >= zLo && e.coord.z <= zHi
