@@ -33,6 +33,16 @@ export {
   W,
 } from "./move.ts";
 
+export {
+  type InfoLineFn,
+  registerInfoLine,
+  registerRenderLayer,
+  type RenderExtensionInput,
+  type RenderLayerFn,
+  unregisterInfoLine,
+  unregisterRenderLayer,
+} from "./extensions.ts";
+
 const PRUNE_INTERVAL_MS = 15 * 60 * 1000;
 
 let pruneTimer: number | undefined;

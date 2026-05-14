@@ -190,6 +190,10 @@ export function renderMap(input: RenderInput): string {
   out.push(...buildContacts(input.entities));
   out.push(divider("ADJACENT SECTORS"));
   out.push(buildAdjacent(input.adjacency));
+  if (input.infoLines && input.infoLines.length > 0) {
+    out.push(divider("INTEL"));
+    for (const line of input.infoLines) out.push("  " + line);
+  }
   out.push(footer());
   return out.map((l) => l.split("\n").map(truncate).join("\n")).join("\n");
 }

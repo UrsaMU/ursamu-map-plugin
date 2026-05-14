@@ -35,6 +35,11 @@ import {
   writeMemoryBatch,
 } from "./fog.ts";
 import { renderMap } from "./renderer.ts";
+import {
+  applyRenderLayers,
+  collectInfoLines,
+  type RenderExtensionInput,
+} from "./extensions.ts";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -198,6 +203,16 @@ export const descFormatHandler: FormatHandler = async (
     ? `[Realm: ${realm}] ${baseTitle}`
     : baseTitle;
 
+  // Sibling extensions paint additional tile layers + append info lines.
+  const extInput: RenderExtensionInput = {
+    centre,
+    viewport: { min, max },
+    sectorTitle,
+    playerId: (active.entity.controllerId ?? undefined) as string | undefined,
+  };
+  applyRenderLayers(tiles, extInput);
+  const infoLines = collectInfoLines(extInput);
+
   const input: RenderInput = {
     sectorTitle,
     centre,
@@ -213,6 +228,7 @@ export const descFormatHandler: FormatHandler = async (
     },
     visibility,
     spectator: active.mode === "spectate",
+    infoLines: infoLines.length > 0 ? infoLines : undefined,
   };
   return renderMap(input);
 };
