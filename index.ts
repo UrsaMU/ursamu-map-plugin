@@ -64,6 +64,13 @@ export {
   getTraversalCost,
 } from "./pathfinding.ts";
 
+export {
+  migrateFogKeys,
+  type MigrationReport,
+  migrateOverlayKeys,
+  migrateToV3,
+} from "./migrate.ts";
+
 const PRUNE_INTERVAL_MS = 15 * 60 * 1000;
 
 let pruneTimer: number | undefined;
