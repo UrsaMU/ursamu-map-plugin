@@ -26,6 +26,7 @@ export {
   NE,
   NW,
   registerMoveGuard,
+  runMoveGuards,
   S,
   SE,
   SW,

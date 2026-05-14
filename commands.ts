@@ -36,6 +36,8 @@ import {
   validateCoord,
 } from "./commands_internals.ts";
 import { defaultMapConfig } from "./config.default.ts";
+import { getTopologyEngine } from "./mapconfig.ts";
+import { runMoveGuards } from "./move.ts";
 
 const HELP = `+map[/<switch>] [<args>]  — Procedural sector map & movement.
 
@@ -370,6 +372,26 @@ addCmd({
     const stack = canStackWith(active.entity, occupants);
     if (!stack.ok) {
       u.send(`%crCannot move ${raw}: ${stack.reason}.%cn`);
+      return;
+    }
+    // Run any registered move-guards. Siblings can veto an entity move with
+    // a reason (encumbrance, locked doors, faction permissions, ICE).
+    const realm = cur.realm ?? "default";
+    const topo = getTopologyEngine(realm);
+    const destBiome = ov?.biome
+      ? (defaultMapConfig.biomes.find((b) => b.id === ov.biome) ??
+        topo.sample(dest).biome)
+      : topo.sample(dest).biome;
+    const guardResult = await runMoveGuards({
+      u,
+      playerId: active.entity.controllerId ?? active.entity.id,
+      from: cur,
+      to: dest,
+      biome: destBiome,
+      cost: 1,
+    });
+    if (!guardResult.allow) {
+      u.send(`%crCannot move ${raw}: ${guardResult.reason}.%cn`);
       return;
     }
     await moveEntity(active.entity.id, dest);
