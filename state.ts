@@ -1,4 +1,4 @@
-import { DBO } from "ursamu";
+import { DBO, dbojs, gameHooks } from "ursamu";
 import type { IUrsamuSDK } from "ursamu";
 import {
   type Coord,
@@ -6,6 +6,12 @@ import {
   OVERLAY_COLLECTION,
   type TileOverlay,
 } from "./schemas.ts";
+
+const emit = (event: string, payload: unknown): void => {
+  (gameHooks as unknown as {
+    emit?: (e: string, p: unknown) => void;
+  }).emit?.(event, payload);
+};
 
 type StoredOverlay = TileOverlay & { id: string };
 
@@ -56,11 +62,13 @@ export const setOverlay = async (overlay: TileOverlay): Promise<void> => {
   const key = coordKey({ x: overlay.x, y: overlay.y, z: overlay.z });
   const record: StoredOverlay = { ...overlay, key, id: key };
   await overlays.update({ id: key }, record);
+  emit("map:overlay:set", { coord: { x: overlay.x, y: overlay.y, z: overlay.z }, overlay });
 };
 
 export const clearOverlay = async (coord: Coord): Promise<void> => {
   const key = coordKey(coord);
   await overlays.delete({ id: key });
+  emit("map:overlay:cleared", { coord });
 };
 
 const isFiniteNumber = (v: unknown): v is number =>
@@ -108,5 +116,15 @@ export const setPlayerCoord = async (
   playerId: string,
   coord: Coord,
 ): Promise<void> => {
+  let from: Coord | null = null;
+  try {
+    const prior = await dbojs.findOne({ id: playerId } as never) as
+      | { data?: Record<string, unknown> }
+      | null;
+    if (prior?.data) from = getPlayerCoord(prior.data);
+  } catch {
+    from = null;
+  }
   await u.db.modify(playerId, "$set", { "data.coord": coord });
+  emit("map:player:moved", { playerId, from, to: coord });
 };

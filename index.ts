@@ -10,6 +10,29 @@ import {
 import { descFormatHandler } from "./format.ts";
 import "./commands.ts";
 
+// Public extension API for sibling plugins.
+export {
+  clearOverlay,
+  getOverlay,
+  getOverlaysInRegion,
+  getPlayerCoord,
+  setOverlay,
+  setPlayerCoord,
+} from "./state.ts";
+export {
+  type EntityProvider,
+  type EntityRegion,
+  getEntitiesInRegion,
+  type ProvidedEntity,
+  registerEntityProvider,
+  unregisterEntityProvider,
+} from "./entities.ts";
+export type {
+  Coord,
+  EntityMarker,
+  TileOverlay,
+} from "./schemas.ts";
+
 const mapPlugin: IPlugin = {
   name: "map",
   version: "1.0.0",

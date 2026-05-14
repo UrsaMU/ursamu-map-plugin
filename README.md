@@ -144,6 +144,50 @@ The handler is registered on the `DESCFORMAT` format-attribute hook. Resolution 
 
 Because the handler returns `null` for any target without `state.coord` *and* no `map` flag, it is safe to register globally.
 
+## Extension API for sibling plugins
+
+The plugin emits `gameHooks` events and exposes a provider registry so other
+plugins (combat systems, encounter tables, GM bridges) can hang behaviour off
+movement and contribute on-map entities without forking.
+
+### Events
+
+| Event | Payload | Fires when |
+| --- | --- | --- |
+| `map:player:moved` | `{ playerId, from: Coord \| null, to: Coord }` | `setPlayerCoord` writes a new coord. `from` is best-effort. |
+| `map:overlay:set` | `{ coord, overlay }` | `setOverlay` succeeds. |
+| `map:overlay:cleared` | `{ coord }` | `clearOverlay` succeeds. |
+
+```ts
+import { gameHooks } from "ursamu";
+
+gameHooks.on("map:player:moved", ({ playerId, from, to }) => {
+  // roll encounter check, charge fatigue, update GM bridge, etc.
+});
+```
+
+### Entity providers
+
+The renderer pulls on-map entities from a provider registry. Each provider
+receives the viewport `{min, max}` and returns the entities it owns.
+
+```ts
+import { registerEntityProvider } from "@ursamu/map-plugin";
+
+registerEntityProvider(async ({ min, max }) => {
+  const npcs = await myEncounterStore.findInRegion(min, max);
+  return npcs.map((n) => ({
+    coord: n.coord,
+    glyph: "N",
+    name: n.name,
+    faction: n.faction,
+  }));
+});
+```
+
+Providers run in parallel; throwing providers are isolated and contribute no
+entities. Out-of-region results are filtered defensively.
+
 ## Tasks
 
 | Task | Description |

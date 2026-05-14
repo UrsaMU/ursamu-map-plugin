@@ -17,6 +17,7 @@ import { DEFAULT_MINIMAP_H, DEFAULT_MINIMAP_W } from "./schemas.ts";
 import { defaultMapConfig } from "./config.default.ts";
 import { createTopologyEngine } from "./topology.ts";
 import { getOverlay, getOverlaysInRegion } from "./state.ts";
+import { getEntitiesInRegion } from "./entities.ts";
 import { renderMap } from "./renderer.ts";
 
 // ─── Heuristics ───────────────────────────────────────────────────────────────
@@ -73,10 +74,17 @@ function buildTiles(
   return grid;
 }
 
-function entitiesInRegion(_centre: Coord, _w: number, _h: number): EntityMarker[] {
-  // Placeholder: a future iteration will query connected players + NPCs
-  // whose state.coord falls inside the viewport. Kept empty for V1.
-  return [];
+async function entitiesInRegion(
+  centre: Coord,
+  w: number,
+  h: number,
+): Promise<EntityMarker[]> {
+  const halfW = Math.floor(w / 2);
+  const halfH = Math.floor(h / 2);
+  const min: Coord = { x: centre.x - halfW, y: centre.y - halfH, z: centre.z };
+  const max: Coord = { x: centre.x + halfW, y: centre.y + halfH, z: centre.z };
+  const provided = await getEntitiesInRegion({ min, max });
+  return provided.map(({ coord: _c, ...marker }) => marker);
 }
 
 // ─── Handler ──────────────────────────────────────────────────────────────────
@@ -124,7 +132,7 @@ export const descFormatHandler: FormatHandler = async (
     tiles,
     neighborhood,
     overlays: merged,
-    entities: entitiesInRegion(centre, w, h),
+    entities: await entitiesInRegion(centre, w, h),
     adjacency: {
       N: neighborhood.ring.N.biome.name,
       S: neighborhood.ring.S.biome.name,
