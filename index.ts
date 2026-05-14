@@ -57,6 +57,12 @@ export {
   getRegionPath,
 } from "./regions.ts";
 
+export {
+  findPath,
+  type FindPathOptions,
+  getTraversalCost,
+} from "./pathfinding.ts";
+
 const PRUNE_INTERVAL_MS = 15 * 60 * 1000;
 
 let pruneTimer: number | undefined;
