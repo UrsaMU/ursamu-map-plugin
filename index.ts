@@ -10,6 +10,7 @@ import {
 
 import { descFormatHandler } from "./format.ts";
 import { pruneStaleMemory } from "./fog.ts";
+import { registerMapRoutes } from "./routes.ts";
 import "./commands.ts";
 
 const PRUNE_INTERVAL_MS = 15 * 60 * 1000;
@@ -31,6 +32,7 @@ const mapPlugin: IPlugin = {
 
   init: () => {
     registerFormatHandler("DESCFORMAT", descFormatHandler);
+    registerMapRoutes();
     if (pruneTimer !== undefined) {
       clearInterval(pruneTimer);
       pruneTimer = undefined;
