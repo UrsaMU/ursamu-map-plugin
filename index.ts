@@ -12,6 +12,26 @@ import { descFormatHandler } from "./format.ts";
 import { pruneStaleMemory } from "./fog.ts";
 import "./commands.ts";
 
+// Public extension API surfaced for sibling plugins.
+export {
+  E,
+  type DirectionDelta,
+  type GuardResult,
+  type MoveContext,
+  type MoveGuard,
+  type MoveResult,
+  moveCoord,
+  N,
+  NE,
+  NW,
+  registerMoveGuard,
+  S,
+  SE,
+  SW,
+  unregisterMoveGuard,
+  W,
+} from "./move.ts";
+
 const PRUNE_INTERVAL_MS = 15 * 60 * 1000;
 
 let pruneTimer: number | undefined;
