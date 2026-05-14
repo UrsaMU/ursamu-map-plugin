@@ -162,6 +162,7 @@ Deno.test("H2: validateEntity rejects multi-char glyph", OPTS, () => {
 import {
   canPilot,
   canClaimEntity,
+  canViewSubject,
   isInBounds,
   validateCoord,
 } from "../commands_internals.ts";
@@ -246,4 +247,60 @@ Deno.test("M3: validateCoord rejects non-integer + out-of-range + bounds", OPTS,
   const bounds = { min: { x: 0, y: 0, z: 0 }, max: { x: 10, y: 10, z: 0 } };
   assertEquals(validateCoord({ x: 11, y: 0, z: 0 }, bounds), null);
   assertEquals(validateCoord({ x: 5, y: 5, z: 0 }, bounds), { x: 5, y: 5, z: 0 });
+});
+
+// ─── H3: subject visibility authorization (DESCFORMAT) ───────────────────────
+
+Deno.test("H3: link-mode viewer cannot look at out-of-faction subject", OPTS, () => {
+  const active = {
+    entity: { id: "scout-1", factionId: "A" },
+    mode: "link" as const,
+  };
+  const subject = { id: "tank-imp", factionId: "B" };
+  assertEquals(canViewSubject(active, subject), false);
+});
+
+Deno.test("H3: container-mode viewer can look at their own subject (self)", OPTS, () => {
+  const active = {
+    entity: { id: "ent-1", factionId: "A" },
+    mode: "container" as const,
+  };
+  const subject = { id: "ent-1", factionId: "A" };
+  assertEquals(canViewSubject(active, subject), true);
+});
+
+Deno.test("H3: container-mode viewer cannot look at a different subject", OPTS, () => {
+  const active = {
+    entity: { id: "ent-1", factionId: "A" },
+    mode: "container" as const,
+  };
+  const subject = { id: "ent-2", factionId: "B" };
+  assertEquals(canViewSubject(active, subject), false);
+});
+
+Deno.test("H3: faction-mate viewer can look at faction-mate subject", OPTS, () => {
+  const active = {
+    entity: { id: "scout-1", factionId: "Republic" },
+    mode: "link" as const,
+  };
+  const subject = { id: "scout-2", factionId: "Republic" };
+  assertEquals(canViewSubject(active, subject), true);
+});
+
+Deno.test("H3: admin spectate always passes", OPTS, () => {
+  const active = {
+    entity: { id: "admin-cam", factionId: undefined },
+    mode: "spectate" as const,
+  };
+  const subject = { id: "anything", factionId: "Imperial" };
+  assertEquals(canViewSubject(active, subject), true);
+});
+
+Deno.test("H3: factionless viewer and factionless subject (distinct ids) → false", OPTS, () => {
+  const active = {
+    entity: { id: "ent-1", factionId: undefined },
+    mode: "link" as const,
+  };
+  const subject = { id: "ent-2", factionId: undefined };
+  assertEquals(canViewSubject(active, subject), false);
 });

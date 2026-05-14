@@ -31,6 +31,10 @@ const mapPlugin: IPlugin = {
 
   init: () => {
     registerFormatHandler("DESCFORMAT", descFormatHandler);
+    if (pruneTimer !== undefined) {
+      clearInterval(pruneTimer);
+      pruneTimer = undefined;
+    }
     void runPrune();
     pruneTimer = setInterval(() => {
       void runPrune();

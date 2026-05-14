@@ -3,6 +3,33 @@
 All notable changes to `@ursamu/map-plugin` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+
+## [2.1.1] - 2026-05-13
+
+### Security
+
+- **H1 — Cross-faction vision leak via DESCFORMAT (HIGH).** A non-admin
+  link-mode viewer could `look` at any `MAP_CAPABLE` container and read
+  the SUBJECT's faction-shared vision + memory, bypassing the intended
+  admin-spectate-only path for "see through someone else's eyes." Fixed
+  with a `canViewSubject(active, subject)` predicate in
+  `commands_internals.ts`: render proceeds only if the viewer's active
+  entity equals the subject, is a same-faction ally, or the viewer is
+  in admin spectate mode. 6 exploit tests in `security.test.ts`.
+
+- **M1 — Cron timer leak on double-init (MED).** If `init()` ran twice
+  without an intervening `remove()` (engine reload, hot-reload, test
+  fixture re-init), the first `setInterval` handle was orphaned and
+  kept firing forever. `init()` now `clearInterval`s any existing
+  timer before scheduling a new one.
+
+### Known limitations (carried forward)
+
+- **M2** TOCTOU on `+move` stacking: two concurrent moves into the same
+  tile can both pass the canStackWith check. Acceptable for V1.
+- **M3** `pruneStaleMemory` scans `fog.all()` per cycle; part of the
+  chunk-key index roadmap.
+
 ## [2.1.0] - 2026-05-13
 
 ### Added

@@ -62,6 +62,30 @@ export function canClaimEntity(
   return isAdminLike(actor);
 }
 
+/**
+ * Returns true iff a viewer with `active` (the result of getActiveEntity)
+ * is allowed to see a render centered on `subject`. Rules:
+ *   - admin spectate (active.mode === "spectate") — always allowed; admin
+ *     deliberately watches through a specific entity, which may be `subject`
+ *     or any other entity.
+ *   - container mode — viewer must be looking at THEIR OWN container; i.e.
+ *     subject must equal active.entity.
+ *   - link mode — same: subject must equal active.entity.
+ *   - faction-mate — a viewer's active entity in the same factionId as
+ *     subject can see the same render (faction-shared FoV).
+ */
+export function canViewSubject(
+  active: { entity: Pick<MapEntity, "id" | "factionId">; mode: "container" | "link" | "spectate" },
+  subject: Pick<MapEntity, "id" | "factionId">,
+): boolean {
+  if (active.mode === "spectate") return true;
+  if (active.entity.id === subject.id) return true;
+  const af = active.entity.factionId;
+  const sf = subject.factionId;
+  if (af && sf && af === sf) return true;
+  return false;
+}
+
 // ─── Bounds + movement math ───────────────────────────────────────────────────
 
 /** Returns true iff coord is inside bounds (or no bounds provided). */

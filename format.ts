@@ -14,6 +14,7 @@ import {
   type TileOverlay,
 } from "./schemas.ts";
 
+import { canViewSubject } from "./commands_internals.ts";
 import { defaultMapConfig } from "./config.default.ts";
 import { createTopologyEngine } from "./topology.ts";
 import { getOverlay, getOverlaysInRegion } from "./state.ts";
@@ -120,6 +121,7 @@ export const descFormatHandler: FormatHandler = async (
 
   const active = await getActiveEntity(u);
   if (!active) return null;
+  if (!canViewSubject(active, subject)) return null;
 
   const cfg = defaultMapConfig;
   const w = cfg.viewportWidth ?? DEFAULT_MINIMAP_W;
