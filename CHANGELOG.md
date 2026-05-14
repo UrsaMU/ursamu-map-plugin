@@ -3,6 +3,87 @@
 All notable changes to `@ursamu/map-plugin` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+
+## [2.1.1] - 2026-05-13
+
+### Security
+
+- **H1 — Cross-faction vision leak via DESCFORMAT (HIGH).** A non-admin
+  link-mode viewer could `look` at any `MAP_CAPABLE` container and read
+  the SUBJECT's faction-shared vision + memory, bypassing the intended
+  admin-spectate-only path for "see through someone else's eyes." Fixed
+  with a `canViewSubject(active, subject)` predicate in
+  `commands_internals.ts`: render proceeds only if the viewer's active
+  entity equals the subject, is a same-faction ally, or the viewer is
+  in admin spectate mode. 6 exploit tests in `security.test.ts`.
+
+- **M1 — Cron timer leak on double-init (MED).** If `init()` ran twice
+  without an intervening `remove()` (engine reload, hot-reload, test
+  fixture re-init), the first `setInterval` handle was orphaned and
+  kept firing forever. `init()` now `clearInterval`s any existing
+  timer before scheduling a new one.
+
+### Known limitations (carried forward)
+
+- **M2** TOCTOU on `+move` stacking: two concurrent moves into the same
+  tile can both pass the canStackWith check. Acceptable for V1.
+- **M3** `pruneStaleMemory` scans `fog.all()` per cycle; part of the
+  chunk-key index roadmap.
+
+## [2.1.0] - 2026-05-13
+
+### Added
+
+- **Faction-based stealth.** `MapEntity.hidden === true` makes an entity
+  invisible to non-faction-mates. Faction-mates always see their own
+  hidden entities. Implemented as a single `isEntityVisibleTo(target,
+  viewer)` predicate in `schemas.ts`; consumed by `unionVisibleFor` in
+  `fog.ts` (faction-shared vision union) and by the entity-marker filter
+  in `format.ts` (rendered contacts list).
+- **Stacking rules.** `+move` refuses to enter a tile occupied by a
+  different-faction (or factionless) entity. Same-faction stacks freely.
+  Admin `+map/jump` and `+map/launch` bypass the check. New pure
+  predicate `canStackWith(mover, occupants)` in `commands_internals.ts`.
+- **Automatic fog memory pruning.** `index.ts` schedules
+  `pruneStaleMemory()` every 15 minutes during `init()` (plus one kick-off
+  run); `remove()` clears the interval. Bounds the `map.fog` DBO growth
+  without an external cron.
+- New test files: `tests/stealth.test.ts` (6), `tests/stacking.test.ts`
+  (8). Total suite: **65 passing** (was 51).
+
+### Security
+
+- Stealth filter applied at TWO layers (vision sharing + render filter)
+  so hostile hidden entities cannot leak through either the FoV-union
+  path or the contacts-section path.
+- Audit findings H1, H2, M1, M2, M3 remediated in v2.0.1 (see
+  preceding commit). Net: pilot authorization, entity-claim
+  authorization, memory TTL, movement bounds, launch coord validation.
+
+## [2.0.0] - 2026-05-13
+
+### BREAKING
+
+- Players no longer carry `state.coord`. Map presence requires a `MapEntity` and either containment in a `MAP_CAPABLE` object or a `state.mapControlling` link.
+- DESCFORMAT handler no longer triggers for arbitrary objects with `state.coord`. It triggers only when the target is a `MapEntity.containerId` and the viewer has a resolvable active entity (or is an admin spectator).
+- `+map/jump` is now admin-only and operates on the caller's active entity, not the caller themselves.
+
+### Added
+
+- `MapEntity` model + `map.entities` DBO collection.
+- `+map/embark`, `+map/disembark`, `+map/launch`, `+map/land`, `+map/link`, `+map/unlink`, `+map/spectate`, `+map/unspectate`, `+map/stats` commands.
+- `+move` command (n/s/e/w/u/d/diagonals) that walks the caller's active entity.
+- Fog of war: live vision (Chebyshev), faction-shared union, explored memory (`map.fog` DBO), terrain occlusion (`BiomeDefinition.occludes`, `TileOverlay.occludes`).
+- `MAP_CAPABLE` object flag as the primary "passenger" gate.
+- `MapConfig.bounds` (optional hard XYZ bounds).
+- `TileOverlay.blocksMovement` for impassable authored tiles.
+
+### Security
+
+- New validateEntity invariants mirror validateOverlay (coord range, glyph length, no `[`/`]` in text, name/kind length caps, vision ≤ MAX_VISION).
+- `+map/jump`, `+map/spectate`, `+map/stats` gated by admin/wizard/superuser flag check inside exec (per catch-all switch pattern).
+- Off-map players see a hard-cordon error message ("You have no map presence"); admin spectate is the only override.
+
 ## [1.1.0] - 2026-05-13
 
 ### Changed

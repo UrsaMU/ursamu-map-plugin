@@ -8,9 +8,21 @@ export interface Coord {
   x: number;
   y: number;
   z: number;
+  /** Logical map id. Absent / empty means {@link DEFAULT_REALM}. */
+  realm?: string;
 }
 
-export const coordKey = (c: Coord): string => `${c.x},${c.y},${c.z}`;
+/** Sentinel for coords with no explicit realm. */
+export const DEFAULT_REALM = "default";
+
+/** Returns the realm of a coord, normalizing missing/empty to {@link DEFAULT_REALM}. */
+export const realmOf = (c: Pick<Coord, "realm">): string => {
+  const r = c.realm;
+  return typeof r === "string" && r.length > 0 ? r : DEFAULT_REALM;
+};
+
+export const coordKey = (c: Coord): string =>
+  `${realmOf(c)}:${c.x},${c.y},${c.z}`;
 
 // ─── Biome & legend ───────────────────────────────────────────────────────────
 
@@ -38,6 +50,8 @@ export interface BiomeDefinition {
   };
   /** Optional traversal cost hint for movement / vehicle rules. */
   traversal?: "trivial" | "easy" | "rough" | "hazard" | "impassable";
+  /** 0..1 vision-blocking; 0 = transparent, 1 = fully blocks line-of-sight. */
+  occludes?: number;
 }
 
 /** Glyph categories enforced by the renderer to keep Latin-1 consistent. */
@@ -48,6 +62,10 @@ export interface MapLegend {
   infrastructure: Glyph[];
   /** Entity glyphs — alphabetical. e.g. "@", "R", "C". */
   entities: Glyph[];
+  /** Glyph rendered for fully-unseen tiles. Default `?`. */
+  fog?: Glyph;
+  /** Glyph rendered for memory-only (last-seen) tiles. Default `.`. */
+  fogMemory?: Glyph;
 }
 
 // ─── Whittaker matrix ─────────────────────────────────────────────────────────
@@ -90,6 +108,15 @@ export interface MapConfig {
   viewportHeight?: number;
   /** Optional named regions used for header labels — keyed by sector slug. */
   sectors?: Record<string, { name: string; aabb: [Coord, Coord] }>;
+  /** Optional hard bounds; movement + jump + setOverlay refuse outside. */
+  bounds?: MapBounds;
+  /** Number of seconds a memory record stays "fresh" before being considered stale. Default 3600. */
+  memoryTtlSeconds?: number;
+}
+
+export interface MapBounds {
+  min: Coord;
+  max: Coord;
 }
 
 // ─── Tile overlay (authored / persistent state) ───────────────────────────────
@@ -100,11 +127,13 @@ export interface MapConfig {
  * "use the topology engine".
  */
 export interface TileOverlay {
-  /** Composite key `${x},${y},${z}` — also persisted as separate fields. */
+  /** Composite key `${realm}:${x},${y},${z}` — also persisted as separate fields. */
   key: string;
   x: number;
   y: number;
   z: number;
+  /** Realm this overlay belongs to. Absent/empty → {@link DEFAULT_REALM}. */
+  realm?: string;
   /** Overrides the procedural biome glyph if set. */
   glyph?: Glyph;
   /** Overrides the procedural biome id if set. */
@@ -117,6 +146,10 @@ export interface TileOverlay {
   faction?: string;
   /** Free-form authored description, evaluated through the format pipeline. */
   desc?: string;
+  /** 0..1 vision-blocking override on top of biome. e.g. wall=1, hill=0.5. */
+  occludes?: number;
+  /** If true, movement commands cannot enter this tile. */
+  blocksMovement?: boolean;
 }
 
 // ─── Topology engine result ───────────────────────────────────────────────────
@@ -170,7 +203,106 @@ export interface RenderInput {
   entities: EntityMarker[];
   /** Cardinal label hints for the "ADJACENT SECTORS" footer. */
   adjacency: { N: string; S: string; E: string; W: string };
+  /**
+   * Optional fog-of-war mask. If omitted, the renderer draws everything live
+   * (back-compat with no-fog callers). If present, tiles outside `live` and
+   * `memory` are rendered as the legend's `fog` glyph, memory-only tiles as
+   * `fogMemory`, and entities not at live-visible coords are dropped.
+   */
+  visibility?: VisibilityMask;
+  /** True when the caller is an admin spectator — renders an indicator. */
+  spectator?: boolean;
 }
+
+// ─── Map entity & fog-of-war contracts ────────────────────────────────────────
+
+/**
+ * A piece on the map. Players never carry a coord; entities do. Players ride
+ * entities via `containerId` (containment model — they're inside the cockpit)
+ * or command them remotely via `controllerId` (link model — for scouts /
+ * structures the player operates from elsewhere).
+ */
+export interface MapEntity {
+  id: string;
+  coord: Coord;
+  glyph: Glyph;
+  /** Free-form category: "vehicle" | "squad" | "scout" | "structure" | ... */
+  kind: string;
+  /** Factions share vision via the union of their entities' live FoV. */
+  factionId?: string;
+  /** dbref of the UrsaMU object the entity inhabits — cockpit / vehicle. */
+  containerId?: string;
+  /** dbref of the player who commands this entity remotely (link model). */
+  controllerId?: string;
+  /** Display name shown in contacts sections + spectate output. */
+  name: string;
+  /** Optional one-line status string. */
+  status?: string;
+  /** Tiles of Chebyshev sight radius. 0 means blind. */
+  vision: number;
+  /** When true, entity does not appear in others' live vision. */
+  hidden?: boolean;
+  /** Real-room dbref where this entity docks when landed; empty while in-map. */
+  lastDock?: string;
+}
+
+/** DBO collection holding MapEntity records. */
+export const ENTITY_COLLECTION = "map.entities";
+
+/**
+ * Last-seen memory of a tile, keyed per faction (or per controller for
+ * factionless entities). Renderer overlays these onto tiles outside the
+ * live-visible set.
+ */
+export interface FogRecord {
+  /** Composite key `${ownerId}|${realm}:${x},${y},${z}`. */
+  key: string;
+  /** factionId or controllerId — whatever owns this memory. */
+  ownerId: string;
+  /** Realm this memory belongs to. Absent → {@link DEFAULT_REALM}. */
+  realm?: string;
+  x: number;
+  y: number;
+  z: number;
+  /** Glyph at the moment the tile was last seen. */
+  glyph: Glyph;
+  /** Optional categorical hint (biome id, overlay kind). */
+  kind?: string;
+  /** Optional last-seen name (e.g., overlay name). */
+  name?: string;
+  /** ms since epoch when the memory was written. */
+  lastSeenAt: number;
+}
+
+/** DBO collection holding FogRecord rows. */
+export const FOG_COLLECTION = "map.fog";
+
+/**
+ * Per-render visibility set. `live` is what the viewer can see RIGHT NOW;
+ * `memory` is the union of memory records for tiles the viewer has seen
+ * before but cannot see now. Keys are `coordKey(...)` strings.
+ */
+export interface VisibilityMask {
+  live: Set<string>;
+  memory: Map<string, FogRecord>;
+}
+
+/** Object flag a builder sets on a vehicle / squad / structure to mark it
+ *  as eligible to host a `MapEntity`. The presence of this flag on
+ *  `u.me.location` is the primary "passenger" gate. */
+export const MAP_CAPABLE_FLAG = "map-capable";
+
+/** Player state field for the link model. Points at a `MapEntity.id`. */
+export const CONTROLLING_STATE_FIELD = "mapControlling";
+
+/** Player state field for admin spectate. Points at a `MapEntity.id`. */
+export const SPECTATING_STATE_FIELD = "mapSpectating";
+
+/** Hard cap on `MapEntity.vision`. */
+export const MAX_VISION = 30;
+
+/** Default memory record TTL in seconds (1 hour). */
+export const DEFAULT_MEMORY_TTL_SECONDS = 3600;
 
 // ─── Renderer output constants ────────────────────────────────────────────────
 
@@ -183,3 +315,16 @@ export const DEFAULT_MINIMAP_H = 7;
 
 /** Plugin DBO collection holding TileOverlay records. */
 export const OVERLAY_COLLECTION = "map.overlays";
+
+/**
+ * Returns true iff `target` should be visible to `viewer` ignoring fog —
+ * i.e., they're on the same faction OR target isn't hidden.
+ */
+export function isEntityVisibleTo(
+  target: Pick<MapEntity, "hidden" | "factionId">,
+  viewer: Pick<MapEntity, "factionId">,
+): boolean {
+  if (!target.hidden) return true;
+  if (!target.factionId) return false;
+  return target.factionId === viewer.factionId;
+}

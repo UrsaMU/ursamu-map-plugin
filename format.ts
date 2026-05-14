@@ -1,144 +1,75 @@
-// DESCFORMAT handler — renders a procedural map sector when the target looks
-// like one. Returns null to fall through to softcode @desc / built-in for
-// anything else. Composition pulls topology + overlays + entities and hands
-// the assembled RenderInput to the renderer.
-
-import type { FormatHandler } from "ursamu";
-import type { IDBObj, IUrsamuSDK } from "ursamu";
-import type {
-  Coord,
-  EntityMarker,
-  RenderInput,
-  RenderTile,
-  TileOverlay,
+// DESCFORMAT handler. Strict gating: target must be a MapEntity.containerId
+// AND viewer (u.me) must have an active entity (passenger/controller/spectate).
+import type { FormatHandler, IDBObj, IUrsamuSDK } from "ursamu";
+import {
+  type Coord,
+  coordKey,
+  DEFAULT_MINIMAP_H,
+  DEFAULT_MINIMAP_W,
+  DEFAULT_REALM,
+  type EntityMarker,
+  isEntityVisibleTo,
+  type MapEntity,
+  realmOf,
+  type RenderInput,
+  type RenderTile,
+  type TileOverlay,
 } from "./schemas.ts";
-import { DEFAULT_MINIMAP_H, DEFAULT_MINIMAP_W } from "./schemas.ts";
 
+import { canViewSubject } from "./commands_internals.ts";
 import { defaultMapConfig } from "./config.default.ts";
 import { createTopologyEngine } from "./topology.ts";
 import { getOverlay, getOverlaysInRegion } from "./state.ts";
+import {
+  getActiveEntity,
+  getEntitiesByContainer,
+  getEntitiesByFaction,
+  getEntitiesInRegion,
+} from "./entities.ts";
+import {
+  buildOcclusionLookup,
+  buildVisibilityMask,
+  computeLiveVisible,
+  getMemoryForOwner,
+  unionLiveVisible,
+  writeMemoryBatch,
+} from "./fog.ts";
 import { renderMap } from "./renderer.ts";
 
-// ─── Heuristics ───────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function readCoord(target: IDBObj): Coord | null {
-  const raw = (target.state as Record<string, unknown>)?.coord;
-  if (!raw || typeof raw !== "object") return null;
-  const { x, y, z } = raw as Record<string, unknown>;
-  if (typeof x !== "number" || typeof y !== "number" || typeof z !== "number") {
-    return null;
-  }
-  return { x, y, z };
-}
+type Topo = ReturnType<typeof createTopologyEngine>;
 
-function isMapSector(target: IDBObj): Coord | null {
-  const coord = readCoord(target);
-  if (coord) return coord;
-  if (target.flags?.has("map")) {
-    return { x: 0, y: 0, z: 0 };
-  }
-  return null;
-}
-
-// ─── Renderer input assembly ─────────────────────────────────────────────────
+const ownerKey = (e: MapEntity): string =>
+  e.factionId ?? e.controllerId ?? e.id;
 
 function buildTiles(
-  centre: Coord,
-  w: number,
-  h: number,
-  overlays: TileOverlay[],
-  topo: ReturnType<typeof createTopologyEngine>,
+  centre: Coord, w: number, h: number, overlays: TileOverlay[], topo: Topo,
 ): RenderTile[][] {
-  const overlayKey = (x: number, y: number) =>
-    overlays.find((o) => o.x === x && o.y === y && o.z === centre.z);
-  const halfW = Math.floor(w / 2);
-  const halfH = Math.floor(h / 2);
+  const realm = realmOf(centre);
+  const lookup = new Map<string, TileOverlay>();
+  for (const o of overlays) {
+    lookup.set(coordKey({ x: o.x, y: o.y, z: o.z, realm: realmOf(o) }), o);
+  }
+  const halfW = Math.floor(w / 2), halfH = Math.floor(h / 2);
   const grid: RenderTile[][] = [];
   for (let row = 0; row < h; row++) {
     const line: RenderTile[] = [];
     const y = centre.y + (halfH - row);
     for (let col = 0; col < w; col++) {
-      const x = centre.x + (col - halfW);
-      const coord: Coord = { x, y, z: centre.z };
-      const ov = overlayKey(x, y);
-      if (ov?.glyph) {
-        line.push({ coord, glyph: ov.glyph, authored: true });
-      } else {
-        const sample = topo.sample(coord);
-        line.push({ coord, glyph: sample.biome.glyph, authored: false });
-      }
+      const coord: Coord = { x: centre.x + (col - halfW), y, z: centre.z };
+      if (realm !== DEFAULT_REALM) coord.realm = realm;
+      const ov = lookup.get(coordKey(coord));
+      line.push(ov?.glyph
+        ? { coord, glyph: ov.glyph, authored: true }
+        : { coord, glyph: topo.sample(coord).biome.glyph, authored: false });
     }
     grid.push(line);
   }
   return grid;
 }
 
-function entitiesInRegion(_centre: Coord, _w: number, _h: number): EntityMarker[] {
-  // Placeholder: a future iteration will query connected players + NPCs
-  // whose state.coord falls inside the viewport. Kept empty for V1.
-  return [];
-}
-
-// ─── Handler ──────────────────────────────────────────────────────────────────
-
-export const descFormatHandler: FormatHandler = async (
-  u: IUrsamuSDK,
-  target: IDBObj,
-  _defaultArg: string,
-): Promise<string | null> => {
-  const centre = isMapSector(target);
-  if (!centre) return null;
-
-  // Highest layer (softcode @desc) is handled by the engine before we run,
-  // but be defensive: if the target carries a stored softcode desc, fall
-  // through so it wins.
-  const softDesc = await u.attr.get(target.id, "DESC");
-  if (softDesc) return null;
-
-  const cfg = defaultMapConfig;
-  const w = cfg.viewportWidth ?? DEFAULT_MINIMAP_W;
-  const h = cfg.viewportHeight ?? DEFAULT_MINIMAP_H;
-  const topo = createTopologyEngine(cfg);
-  const neighborhood = topo.sampleNeighborhood(centre);
-
-  const halfW = Math.floor(w / 2);
-  const halfH = Math.floor(h / 2);
-  const overlays = await getOverlaysInRegion(
-    { x: centre.x - halfW, y: centre.y - halfH, z: centre.z },
-    { x: centre.x + halfW, y: centre.y + halfH, z: centre.z },
-  );
-  const centreOverlay = await getOverlay(centre);
-  const merged = centreOverlay
-    ? [...overlays.filter((o) => o.key !== centreOverlay.key), centreOverlay]
-    : overlays;
-
-  const tiles = buildTiles(centre, w, h, merged, topo);
-
-  const sectorTitle = centreOverlay?.name ??
-    cfgSectorName(cfg, centre) ??
-    `Sector ${centre.x},${centre.y},${centre.z}`;
-
-  const input: RenderInput = {
-    sectorTitle,
-    centre,
-    tiles,
-    neighborhood,
-    overlays: merged,
-    entities: entitiesInRegion(centre, w, h),
-    adjacency: {
-      N: neighborhood.ring.N.biome.name,
-      S: neighborhood.ring.S.biome.name,
-      E: neighborhood.ring.E.biome.name,
-      W: neighborhood.ring.W.biome.name,
-    },
-  };
-  return renderMap(input);
-};
-
-function cfgSectorName(
-  cfg: typeof defaultMapConfig,
-  c: Coord,
-): string | null {
+function cfgSectorName(cfg: typeof defaultMapConfig, c: Coord): string | null {
   if (!cfg.sectors) return null;
   for (const slug of Object.keys(cfg.sectors)) {
     const { name, aabb } = cfg.sectors[slug];
@@ -151,3 +82,137 @@ function cfgSectorName(
   }
   return null;
 }
+
+async function resolveViewParty(subject: MapEntity): Promise<MapEntity[]> {
+  if (!subject.factionId) return [subject];
+  const party = await getEntitiesByFaction(subject.factionId);
+  return party.length > 0 ? party : [subject];
+}
+
+function tileGlyphAt(
+  c: Coord, tiles: RenderTile[][], centre: Coord, w: number, h: number,
+): string | null {
+  if (c.z !== centre.z) return null;
+  const col = c.x - centre.x + Math.floor(w / 2);
+  const row = Math.floor(h / 2) - (c.y - centre.y);
+  if (row < 0 || row >= h || col < 0 || col >= w) return null;
+  return tiles[row][col].glyph;
+}
+
+function filterEntityMarkers(
+  pool: MapEntity[], live: Set<string>, viewer: Pick<MapEntity, "factionId">,
+): EntityMarker[] {
+  const out: EntityMarker[] = [];
+  for (const e of pool) {
+    if (!live.has(coordKey(e.coord))) continue;
+    if (!isEntityVisibleTo(e, viewer)) continue;
+    out.push({ glyph: e.glyph, name: e.name, faction: e.factionId, status: e.status, groupKey: e.kind });
+  }
+  return out;
+}
+
+// ─── Handler ──────────────────────────────────────────────────────────────────
+
+export const descFormatHandler: FormatHandler = async (
+  u: IUrsamuSDK,
+  target: IDBObj,
+  _defaultArg: string,
+): Promise<string | null> => {
+  const softDesc = await u.attr.get(target.id, "DESC");
+  if (softDesc) return null;
+
+  const candidates = await getEntitiesByContainer(target.id);
+  const subject = candidates[0];
+  if (!subject) return null;
+
+  const active = await getActiveEntity(u);
+  if (!active) return null;
+  if (!canViewSubject(active, subject)) return null;
+
+  const cfg = defaultMapConfig;
+  const w = cfg.viewportWidth ?? DEFAULT_MINIMAP_W;
+  const h = cfg.viewportHeight ?? DEFAULT_MINIMAP_H;
+  const halfW = Math.floor(w / 2);
+  const halfH = Math.floor(h / 2);
+  const centre = subject.coord;
+
+  const topo = createTopologyEngine(cfg);
+  const realm = realmOf(centre);
+  const min: Coord = { x: centre.x - halfW, y: centre.y - halfH, z: centre.z };
+  const max: Coord = { x: centre.x + halfW, y: centre.y + halfH, z: centre.z };
+  if (realm !== DEFAULT_REALM) {
+    min.realm = realm;
+    max.realm = realm;
+  }
+  const regionOverlays = await getOverlaysInRegion(min, max);
+  const centreOverlay = await getOverlay(centre);
+  const merged = centreOverlay
+    ? [...regionOverlays.filter((o) => o.key !== centreOverlay.key), centreOverlay]
+    : regionOverlays;
+
+  const tiles = buildTiles(centre, w, h, merged, topo);
+  const neighborhood = topo.sampleNeighborhood(centre);
+
+  // FoW: occlusion is computed from the SUBJECT's vantage; under admin spectate,
+  // the admin's viewer entity differs from the subject, but vision is the
+  // subject's, so the admin sees through the spectated piece.
+  const party = await resolveViewParty(subject);
+  const occlusion = buildOcclusionLookup(topo, merged);
+  const live = party.length > 1
+    ? unionLiveVisible(party, occlusion)
+    : computeLiveVisible(subject, occlusion);
+
+  const owner = ownerKey(subject);
+  const memory = await getMemoryForOwner(owner);
+  const visibility = buildVisibilityMask(live, memory);
+
+  const now = Date.now();
+  const updates = [];
+  for (const k of live) {
+    const colon = k.indexOf(":");
+    const raw = colon >= 0 ? k.slice(colon + 1) : k;
+    const [xs, ys, zs] = raw.split(",");
+    const c: Coord = { x: Number(xs), y: Number(ys), z: Number(zs) };
+    if (realm !== DEFAULT_REALM) c.realm = realm;
+    const glyph = tileGlyphAt(c, tiles, centre, w, h);
+    if (!glyph) continue;
+    const ov = merged.find((o) =>
+      o.x === c.x && o.y === c.y && o.z === c.z && realmOf(o) === realm
+    );
+    updates.push({
+      key: `${owner}|${k}`, ownerId: owner,
+      realm: realm !== DEFAULT_REALM ? realm : undefined,
+      x: c.x, y: c.y, z: c.z,
+      glyph, kind: ov?.kind, name: ov?.name, lastSeenAt: now,
+    });
+  }
+  if (updates.length > 0) await writeMemoryBatch(updates);
+
+  const pool = await getEntitiesInRegion(min, max);
+  const entities = filterEntityMarkers(pool, live, subject);
+
+  const baseTitle = centreOverlay?.name ??
+    cfgSectorName(cfg, centre) ??
+    `Sector ${centre.x},${centre.y},${centre.z}`;
+  const sectorTitle = realm !== DEFAULT_REALM
+    ? `[Realm: ${realm}] ${baseTitle}`
+    : baseTitle;
+
+  const input: RenderInput = {
+    sectorTitle,
+    centre,
+    tiles,
+    neighborhood,
+    overlays: merged,
+    entities,
+    adjacency: {
+      N: neighborhood.ring.N.biome.name,
+      S: neighborhood.ring.S.biome.name,
+      E: neighborhood.ring.E.biome.name,
+      W: neighborhood.ring.W.biome.name,
+    },
+    visibility,
+    spectator: active.mode === "spectate",
+  };
+  return renderMap(input);
+};

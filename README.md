@@ -70,8 +70,20 @@ await loadPlugin(mapPlugin);   // registers +map, wires DESCFORMAT
 
 | Command | Lock | What it does |
 | --- | --- | --- |
-| `+map` / `+map/here` | `connected` | Renders the procedural sector centred on the caller's `state.coord` (defaults to `0,0,0`). |
-| `+map/jump <x> <y> [z]` | `connected` + builder/admin/wizard/superuser | Teleports the caller's map cursor to a coordinate and re-renders. |
+| `+map` / `+map/here` | `connected` | Renders the procedural sector centred on the caller's active `MapEntity`. |
+| `+map/embark <vehicle>` | `connected` | Board a `map-capable` object in the same room. |
+| `+map/disembark` | `connected` | Step out of the current vehicle into its current location. |
+| `+map/launch` | `connected` | From inside a `map-capable` vehicle, create a `MapEntity` and enter the map. |
+| `+map/land` | `connected` | Destroy the `MapEntity`, return the vehicle to `lastDock`. |
+| `+move <dir>` | `connected` | `n/s/e/w/ne/nw/se/sw/u/d` — walk the caller's active entity. |
+| `+map/link <entityId>` | `connected` | Take remote control of a scout / structure that names you as `controllerId`. |
+| `+map/unlink` | `connected` | Release any remote link. |
+| `+map/spectate <entityId>` | admin | See the map through an entity's eyes; read-only. |
+| `+map/unspectate` | admin | Exit spectate mode. |
+| `+map/stats` | admin | Dump entity / fog DBO summary. |
+| `+map/jump <x> <y> [z]` | admin | Teleport the caller's active entity to a coordinate. |
+
+See [docs/entities.md](./docs/entities.md), [docs/embarkation.md](./docs/embarkation.md), [docs/fog-of-war.md](./docs/fog-of-war.md).
 
 Help text registered with the engine (verbatim from `commands.ts`):
 
@@ -124,6 +136,8 @@ See `docs/configuration.md` for the Whittaker matrix deep-dive.
 Procedural is the default. Every call to `+map` (or any DESCFORMAT resolution against a coord-bearing target) runs `topology.sample()` over the viewport — no rooms are created, no DBO records are written. The same coordinate is the same biome for the lifetime of the seed.
 
 `setOverlay(overlay)` is the *only* way to make a coordinate persistent. Overlays live in the DBO collection **`map.overlays`** (constant `OVERLAY_COLLECTION` in `schemas.ts`), keyed by `` `${x},${y},${z}` ``. Overlay records carry optional `glyph`, `biome`, `name`, `kind`, `faction`, `desc`. Reads through `getOverlaysInRegion(min, max)` reject any AABB whose span exceeds `REGION_MAX_TILES = 4096`.
+
+**MapEntity + map-capable gating.** Mobile pieces of the world (vehicles, squads, scouts) are persisted as `MapEntity` rows in the `map.entities` DBO collection — players never carry coordinates themselves. A `MapEntity` is only reachable from in-game when its `containerId` references a `MAP_CAPABLE` object the player has embarked, or when the player's `state.mapControlling` names the entity as a remote link. Without one of those, the player has no map presence and every map command refuses. See [docs/entities.md](./docs/entities.md) for the full model.
 
 ## Security invariants
 
@@ -184,11 +198,11 @@ UrsaMU **>= 2.5.2**. The plugin imports `createNoise` (per-instance `Noise` clas
 
 ## Roadmap
 
-- `entitiesInRegion` in `format.ts` currently returns `[]`. Needs to query connected players and NPCs whose `state.coord` falls inside the viewport.
-- `getOverlaysInRegion` in `state.ts` does an in-memory full scan (`overlays.all()`). A chunk-key index is pending.
+- Chunk-key index for `map.fog` and `map.entities` so per-render region queries stop full-scanning the collections.
+- Vehicle stacking / collision rules — currently two entities can share a tile silently.
+- Line-of-sight for stealth detection: tie `MapEntity.hidden` into per-viewer probabilistic spotting rather than a binary toggle.
 - REST routes (read-only sector lookup, builder overlay CRUD) are not implemented.
-- Softcode `@coord` attribute integration — let builders set `state.coord` from in-game without DB pokes.
-- Vehicle wrapper for `move` so traversal cost (`BiomeDefinition.traversal`) actually gates movement.
+- `getOverlaysInRegion` still uses an in-memory full scan; a shared chunk index would cover overlays too.
 
 ## License
 
