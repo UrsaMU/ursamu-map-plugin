@@ -212,6 +212,8 @@ export interface RenderInput {
   visibility?: VisibilityMask;
   /** True when the caller is an admin spectator — renders an indicator. */
   spectator?: boolean;
+  /** Optional info lines appended below "ADJACENT SECTORS" by extension API. */
+  infoLines?: string[];
 }
 
 // ─── Map entity & fog-of-war contracts ────────────────────────────────────────
