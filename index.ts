@@ -20,6 +20,12 @@ export {
   unregisterMapConfig,
 } from "./mapconfig.ts";
 
+export {
+  effectiveRegions,
+  getRegion,
+  getRegionPath,
+} from "./regions.ts";
+
 const PRUNE_INTERVAL_MS = 15 * 60 * 1000;
 
 let pruneTimer: number | undefined;

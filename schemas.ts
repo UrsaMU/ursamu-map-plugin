@@ -82,6 +82,26 @@ export interface WhittakerCell {
 
 // ─── Plugin configuration ─────────────────────────────────────────────────────
 
+/**
+ * A named region (AABB). Regions can nest via `parent`, letting consumers
+ * model "Mos Eisley → Hutt Space → Lawless" without bolting metadata on
+ * top of flat sectors.
+ */
+export interface Region {
+  /** Stable slug; used as `parent` references. */
+  slug: string;
+  /** Display name. */
+  name: string;
+  /** Inclusive bounding box. */
+  aabb: [Coord, Coord];
+  /** Slug of the enclosing region, if any. */
+  parent?: string;
+  /** Free-form tags ("lawless", "spaceport"). */
+  tags?: string[];
+  /** Arbitrary metadata bag for sibling plugins. */
+  metadata?: Record<string, unknown>;
+}
+
 export interface MapNoiseConfig {
   seed: string;
   /** World-space distance covered by one base-octave noise unit. */
@@ -106,8 +126,18 @@ export interface MapConfig {
   viewportWidth?: number;
   /** Height of the rendered minimap in cells. Must be odd. Default 7. */
   viewportHeight?: number;
-  /** Optional named regions used for header labels — keyed by sector slug. */
+  /**
+   * Legacy: flat AABB sectors keyed by slug. Preserved for back-compat; the
+   * renderer auto-converts these into single-level Regions when `regions` is
+   * not set. New consumers should prefer {@link MapConfig.regions}.
+   */
   sectors?: Record<string, { name: string; aabb: [Coord, Coord] }>;
+  /**
+   * Nested named regions. Renderer uses {@link getRegion} to resolve the
+   * deepest matching region for a coord and labels the header with the full
+   * region path (deepest → outermost).
+   */
+  regions?: Region[];
   /** Optional hard bounds; movement + jump + setOverlay refuse outside. */
   bounds?: MapBounds;
   /** Number of seconds a memory record stays "fresh" before being considered stale. Default 3600. */
