@@ -10,6 +10,7 @@ import {
 
 import { descFormatHandler } from "./format.ts";
 import { pruneStaleMemory } from "./fog.ts";
+import { registerMapRoutes } from "./routes.ts";
 import "./commands.ts";
 
 // Public extension API surfaced for sibling plugins.
@@ -51,6 +52,7 @@ const mapPlugin: IPlugin = {
 
   init: () => {
     registerFormatHandler("DESCFORMAT", descFormatHandler);
+    registerMapRoutes();
     if (pruneTimer !== undefined) {
       clearInterval(pruneTimer);
       pruneTimer = undefined;
