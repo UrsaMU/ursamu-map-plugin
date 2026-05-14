@@ -158,6 +158,153 @@ The handler is registered on the `DESCFORMAT` format-attribute hook. Resolution 
 
 Because the handler returns `null` for any target without `state.coord` *and* no `map` flag, it is safe to register globally.
 
+## Extension API for sibling plugins
+
+The plugin exposes a set of registries and helpers so sibling plugins
+(combat systems, encounter tables, AI GM bridges, mobile companion apps)
+can extend the map without forking.
+
+### Realms (multi-map)
+
+A `realm` is a logical map id. Coords carry an optional `realm` field; when
+absent, they belong to `"default"`. The plugin uses realms throughout —
+overlay lookups, entity scans, fog memory, and topology sampling all scope
+by realm.
+
+```ts
+import { realmOf, DEFAULT_REALM } from "@ursamu/map-plugin";
+realmOf({ x: 0, y: 0, z: 0, realm: "tatooine" }); // "tatooine"
+realmOf({ x: 0, y: 0, z: 0 });                    // "default"
+```
+
+### Per-realm `MapConfig`
+
+```ts
+import { registerMapConfig, getMapConfig } from "@ursamu/map-plugin";
+
+registerMapConfig("tatooine", tatooineCfg);
+// later: `getMapConfig("tatooine")` (and the cached TopologyEngine) drive
+// rendering whenever a coord with realm "tatooine" is sampled.
+```
+
+Unregistered realms fall back to `defaultMapConfig`. Re-registering a realm
+invalidates its cached `TopologyEngine`.
+
+### Movement guards
+
+`moveCoord(u, playerId, from, delta, opts?)` performs a single-step move
+with traversal cost + guard veto. Siblings register guards to veto with a
+reason:
+
+```ts
+import { registerMoveGuard, moveCoord, N } from "@ursamu/map-plugin";
+
+registerMoveGuard(({ playerId, to }) =>
+  isEncumbered(playerId)
+    ? { allow: false, reason: "encumbered" }
+    : { allow: true }
+);
+
+const result = await moveCoord(u, playerId, currentCoord, N);
+// { ok: false, blocked: "encumbered", cost: 1, biome, from, to }  on veto
+// { ok: true, cost, biome, from, to }                              on success
+```
+
+`+move` runs the same guard chain via `runMoveGuards(ctx)`, so guards fire
+on both player- and entity-driven moves.
+
+Emitted events (via `gameHooks`):
+
+| Event | Payload | Fires when |
+| --- | --- | --- |
+| `map:player:moved` | `{ playerId, from, to, biome, cost }` | `moveCoord` succeeds |
+| `map:player:blocked` | `{ playerId, from, to, reason, biome }` | terrain / overlay / guard veto |
+
+### Render extension points
+
+```ts
+import { registerRenderLayer, registerInfoLine } from "@ursamu/map-plugin";
+
+registerRenderLayer("encounters", ({ viewport, realm }) =>
+  encountersIn(viewport, realm).map((e) => ({
+    coord: e.coord,
+    glyph: "!",
+    authored: true,
+  }))
+);
+
+registerInfoLine(({ realm }) =>
+  `Faction: ${activeFactionFor(realm)}`
+);
+```
+
+Layers paint in registration order; later wins at the same coord.
+Re-registering the same name replaces. Info lines append below "ADJACENT
+SECTORS" in a new "INTEL" section. Each provider is sandboxed — a thrown
+provider is logged and skipped, render still completes.
+
+### Regions
+
+Nested regions with metadata. `getRegion` returns the deepest match;
+`getRegionPath` returns the deepest-to-outermost chain.
+
+```ts
+import { getRegion, getRegionPath } from "@ursamu/map-plugin";
+
+const cfg = getMapConfig("tatooine");
+getRegion(cfg, { x: 0, y: 0, z: 0, realm: "tatooine" });
+// → { slug: "moseisley", name: "Mos Eisley", parent: "huttspace", tags: ["spaceport"], ... }
+
+getRegionPath(cfg, coord).map((r) => r.name).join(" — ");
+// → "Mos Eisley — Hutt Space — Outer Rim"
+```
+
+Legacy `MapConfig.sectors` still works; it auto-converts into single-level
+regions when `regions` isn't set.
+
+### Pathfinding
+
+```ts
+import { findPath, getTraversalCost } from "@ursamu/map-plugin";
+
+const path = findPath(from, to, {
+  overlays: await getOverlaysInRegion(min, max),
+  maxCost: 64,
+  avoid: (c) => isHostileTile(c),
+});
+```
+
+A* on the grid. Honors `BiomeDefinition.traversal` + overlay
+`blocksMovement` / `kind === "blocked"`. Diagonals on by default (cost
+×√2). Returns `null` when unreachable within `maxCost` or
+`maxIterations`. Cross-realm and cross-z queries return `null`.
+
+### REST surface
+
+Bearer-authenticated routes under `/api/v1/map/`:
+
+- `GET /api/v1/map/realm/:id/render?center=x,y&radius=N` — JSON tile grid (parity with the in-game renderer).
+- `GET /api/v1/map/player/:id` — `{ realm, coord, biome }`.
+- `POST /api/v1/map/overlay` — admin-locked, author tile.
+- `DELETE /api/v1/map/overlay?x=&y=&z=` — admin-locked, clear tile.
+
+All routes return 401 before any DB / topology work when the bearer
+resolves to a null user.
+
+### v3 migration
+
+After upgrading from v2.x, run once:
+
+```ts
+import { migrateToV3 } from "@ursamu/map-plugin";
+
+await migrateToV3();
+// { overlays: { inspected, rewritten, skipped }, fog: { ... } }
+```
+
+Rewrites pre-v3 `"x,y,z"` DBO ids/keys into the v3 `"realm:x,y,z"` form.
+Idempotent.
+
 ## Tasks
 
 | Task | Description |
@@ -179,6 +326,15 @@ ursamu-map-plugin/
   state.ts                 DBO overlays, player coord, validators
   format.ts                DESCFORMAT handler (renderer input assembly)
   renderer.ts              Latin-1 split-pane renderer
+  entities.ts              MapEntity DBO + access predicates
+  fog.ts                   fog-of-war, visibility, memory pruning
+  mapconfig.ts             per-realm MapConfig + TopologyEngine registry
+  regions.ts               nested region resolution
+  move.ts                  moveCoord, move-guard registry, runMoveGuards
+  extensions.ts            render-layer + info-line provider registries
+  pathfinding.ts           getTraversalCost + findPath (A*)
+  routes.ts                /api/v1/map REST surface
+  migrate.ts               v3 DBO key migration helpers
   config.default.ts        bundled default biomes / matrix / noise
   config/config.json       runtime overrides
   help/map.md              in-game help
