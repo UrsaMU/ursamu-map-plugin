@@ -19,6 +19,7 @@ import {
 
 import { canViewSubject } from "./commands_internals.ts";
 import { getMapConfig, getTopologyEngine } from "./mapconfig.ts";
+import { getRegionPath } from "./regions.ts";
 import { getOverlay, getOverlaysInRegion } from "./state.ts";
 import {
   getActiveEntity,
@@ -74,18 +75,11 @@ function buildTiles(
   return grid;
 }
 
-function cfgSectorName(cfg: MapConfig, c: Coord): string | null {
-  if (!cfg.sectors) return null;
-  for (const slug of Object.keys(cfg.sectors)) {
-    const { name, aabb } = cfg.sectors[slug];
-    const [lo, hi] = aabb;
-    if (
-      c.x >= lo.x && c.x <= hi.x &&
-      c.y >= lo.y && c.y <= hi.y &&
-      c.z >= lo.z && c.z <= hi.z
-    ) return name;
-  }
-  return null;
+function cfgRegionLabel(cfg: MapConfig, c: Coord): string | null {
+  const path = getRegionPath(cfg, c);
+  if (path.length === 0) return null;
+  // Render "City — Country — Continent" (deepest first).
+  return path.map((r) => r.name).join(" — ");
 }
 
 async function resolveViewParty(subject: MapEntity): Promise<MapEntity[]> {
@@ -197,7 +191,7 @@ export const descFormatHandler: FormatHandler = async (
   const entities = filterEntityMarkers(pool, live, subject);
 
   const baseTitle = centreOverlay?.name ??
-    cfgSectorName(cfg, centre) ??
+    cfgRegionLabel(cfg, centre) ??
     `Sector ${centre.x},${centre.y},${centre.z}`;
   const sectorTitle = realm !== DEFAULT_REALM
     ? `[Realm: ${realm}] ${baseTitle}`
