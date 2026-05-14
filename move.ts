@@ -80,6 +80,36 @@ export function _clearMoveGuards(): void {
   guards.length = 0;
 }
 
+/**
+ * Run the registered guard chain against a caller-built {@link MoveContext}.
+ * Use this when you have your own move pipeline (e.g. entity-driven moves
+ * via `moveEntity`) and just want guard veto semantics. First veto wins;
+ * throwing guards are isolated and skipped. On veto, emits `map:player:blocked`
+ * with the reason so listeners observe the same event surface as `moveCoord`.
+ */
+export async function runMoveGuards(ctx: MoveContext): Promise<GuardResult> {
+  for (const g of guards) {
+    let r: GuardResult;
+    try {
+      r = await g(ctx);
+    } catch (err) {
+      console.error("[map-plugin] move guard threw:", err);
+      continue;
+    }
+    if (!r.allow) {
+      emit("map:player:blocked", {
+        playerId: ctx.playerId,
+        from: ctx.from,
+        to: ctx.to,
+        reason: r.reason,
+        biome: ctx.biome,
+      });
+      return r;
+    }
+  }
+  return { allow: true };
+}
+
 // ─── moveCoord ───────────────────────────────────────────────────────────────
 
 export interface MoveOptions {

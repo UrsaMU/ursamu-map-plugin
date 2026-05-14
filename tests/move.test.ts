@@ -6,6 +6,7 @@ import {
   moveCoord,
   N,
   registerMoveGuard,
+  runMoveGuards,
   unregisterMoveGuard,
 } from "../move.ts";
 import { gameHooks } from "ursamu";
@@ -168,4 +169,40 @@ Deno.test("moveCoord: cost reflects traversal class", OPTS, async () => {
   assert(hazard.ok && hazard.cost === 3);
 
   hooks.detach();
+});
+
+Deno.test("runMoveGuards: passes through when no guards veto", OPTS, async () => {
+  _clearMoveGuards();
+  const result = await runMoveGuards({
+    u: {} as unknown as IUrsamuSDK,
+    playerId: "p1",
+    from: { x: 0, y: 0, z: 0 },
+    to: { x: 1, y: 0, z: 0 },
+    biome: biome("grass", "easy"),
+    cost: 1,
+  });
+  assertEquals(result.allow, true);
+});
+
+Deno.test("runMoveGuards: first veto wins and emits map:player:blocked", OPTS, async () => {
+  _clearMoveGuards();
+  const hooks = recordHooks();
+  registerMoveGuard(() => ({ allow: false, reason: "locked-door" }));
+  registerMoveGuard(() => ({ allow: false, reason: "would-not-fire" }));
+  const result = await runMoveGuards({
+    u: {} as unknown as IUrsamuSDK,
+    playerId: "p1",
+    from: { x: 0, y: 0, z: 0 },
+    to: { x: 1, y: 0, z: 0 },
+    biome: biome("grass", "easy"),
+    cost: 1,
+  });
+  assertEquals(result.allow, false);
+  if (!result.allow) assertEquals(result.reason, "locked-door");
+  const blocked = hooks.events.find((e) => e.name === "map:player:blocked");
+  assert(blocked, "blocked event fires");
+  // deno-lint-ignore no-explicit-any
+  assertEquals((blocked!.payload as any).reason, "locked-door");
+  hooks.detach();
+  _clearMoveGuards();
 });
