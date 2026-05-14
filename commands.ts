@@ -22,6 +22,7 @@ import { getOverlay } from "./state.ts";
 import {
   destroyEntity,
   getActiveEntity,
+  getEntitiesInRegion,
   getEntity,
   moveEntity,
   setEntity,
@@ -29,6 +30,7 @@ import {
 import {
   canClaimEntity,
   canPilot,
+  canStackWith,
   isInBounds,
   parseCoord,
   validateCoord,
@@ -361,6 +363,12 @@ addCmd({
     const ov = await getOverlay(dest);
     if (ov?.blocksMovement === true) {
       u.send(`%crCannot move ${raw}: tile blocks movement.%cn`);
+      return;
+    }
+    const occupants = await getEntitiesInRegion({ ...dest }, { ...dest });
+    const stack = canStackWith(active.entity, occupants);
+    if (!stack.ok) {
+      u.send(`%crCannot move ${raw}: ${stack.reason}.%cn`);
       return;
     }
     await moveEntity(active.entity.id, dest);

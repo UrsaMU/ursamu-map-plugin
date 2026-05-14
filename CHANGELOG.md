@@ -3,6 +3,36 @@
 All notable changes to `@ursamu/map-plugin` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.1.0] - 2026-05-13
+
+### Added
+
+- **Faction-based stealth.** `MapEntity.hidden === true` makes an entity
+  invisible to non-faction-mates. Faction-mates always see their own
+  hidden entities. Implemented as a single `isEntityVisibleTo(target,
+  viewer)` predicate in `schemas.ts`; consumed by `unionVisibleFor` in
+  `fog.ts` (faction-shared vision union) and by the entity-marker filter
+  in `format.ts` (rendered contacts list).
+- **Stacking rules.** `+move` refuses to enter a tile occupied by a
+  different-faction (or factionless) entity. Same-faction stacks freely.
+  Admin `+map/jump` and `+map/launch` bypass the check. New pure
+  predicate `canStackWith(mover, occupants)` in `commands_internals.ts`.
+- **Automatic fog memory pruning.** `index.ts` schedules
+  `pruneStaleMemory()` every 15 minutes during `init()` (plus one kick-off
+  run); `remove()` clears the interval. Bounds the `map.fog` DBO growth
+  without an external cron.
+- New test files: `tests/stealth.test.ts` (6), `tests/stacking.test.ts`
+  (8). Total suite: **65 passing** (was 51).
+
+### Security
+
+- Stealth filter applied at TWO layers (vision sharing + render filter)
+  so hostile hidden entities cannot leak through either the FoV-union
+  path or the contacts-section path.
+- Audit findings H1, H2, M1, M2, M3 remediated in v2.0.1 (see
+  preceding commit). Net: pilot authorization, entity-claim
+  authorization, memory TTL, movement bounds, launch coord validation.
+
 ## [2.0.0] - 2026-05-13
 
 ### BREAKING

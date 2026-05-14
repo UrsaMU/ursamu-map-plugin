@@ -299,3 +299,16 @@ export const DEFAULT_MINIMAP_H = 7;
 
 /** Plugin DBO collection holding TileOverlay records. */
 export const OVERLAY_COLLECTION = "map.overlays";
+
+/**
+ * Returns true iff `target` should be visible to `viewer` ignoring fog —
+ * i.e., they're on the same faction OR target isn't hidden.
+ */
+export function isEntityVisibleTo(
+  target: Pick<MapEntity, "hidden" | "factionId">,
+  viewer: Pick<MapEntity, "factionId">,
+): boolean {
+  if (!target.hidden) return true;
+  if (!target.factionId) return false;
+  return target.factionId === viewer.factionId;
+}

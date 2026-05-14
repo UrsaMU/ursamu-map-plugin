@@ -7,6 +7,7 @@ import {
   DEFAULT_MINIMAP_H,
   DEFAULT_MINIMAP_W,
   type EntityMarker,
+  isEntityVisibleTo,
   type MapEntity,
   type RenderInput,
   type RenderTile,
@@ -92,12 +93,12 @@ function tileGlyphAt(
 }
 
 function filterEntityMarkers(
-  pool: MapEntity[], live: Set<string>, viewerFaction: string | undefined,
+  pool: MapEntity[], live: Set<string>, viewer: Pick<MapEntity, "factionId">,
 ): EntityMarker[] {
   const out: EntityMarker[] = [];
   for (const e of pool) {
     if (!live.has(coordKey(e.coord))) continue;
-    if (e.hidden && e.factionId !== viewerFaction) continue;
+    if (!isEntityVisibleTo(e, viewer)) continue;
     out.push({ glyph: e.glyph, name: e.name, faction: e.factionId, status: e.status, groupKey: e.kind });
   }
   return out;
@@ -168,7 +169,7 @@ export const descFormatHandler: FormatHandler = async (
   if (updates.length > 0) await writeMemoryBatch(updates);
 
   const pool = await getEntitiesInRegion(min, max);
-  const entities = filterEntityMarkers(pool, live, subject.factionId);
+  const entities = filterEntityMarkers(pool, live, subject);
 
   const sectorTitle = centreOverlay?.name ??
     cfgSectorName(cfg, centre) ??

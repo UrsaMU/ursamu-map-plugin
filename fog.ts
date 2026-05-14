@@ -5,6 +5,7 @@ import {
   DEFAULT_MEMORY_TTL_SECONDS,
   FOG_COLLECTION,
   type FogRecord,
+  isEntityVisibleTo,
   type MapEntity,
   type TileOverlay,
   type VisibilityMask,
@@ -114,6 +115,21 @@ export function unionLiveVisible(
     for (const k of part) out.add(k);
   }
   return out;
+}
+
+/**
+ * Like `unionLiveVisible` but only sums vision from entities that the
+ * given viewer can "see-through" — i.e., the viewer's own entities (same
+ * faction or not hidden). Used for faction-shared FoV: a hostile scout
+ * doesn't share vision with you even if standing on the same tile.
+ */
+export function unionVisibleFor(
+  viewer: MapEntity,
+  candidates: MapEntity[],
+  occlusion: OcclusionLookup,
+): Set<string> {
+  const allowed = candidates.filter((e) => isEntityVisibleTo(e, viewer));
+  return unionLiveVisible(allowed, occlusion);
 }
 
 export function buildVisibilityMask(

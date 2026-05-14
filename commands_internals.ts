@@ -81,6 +81,26 @@ export function isInBounds(coord: Coord, bounds?: MapBounds): boolean {
  * vehicle state.coord up front rather than failing inside setEntity with a
  * cryptic message.
  */
+/**
+ * Returns ok iff `mover` may enter a tile occupied by `tileOccupants` per the
+ * stacking rule: same-faction stacks freely, different-faction (including
+ * factionless on either side) blocks. An empty occupant list always returns ok.
+ */
+export function canStackWith(
+  mover: Pick<MapEntity, "id" | "factionId">,
+  tileOccupants: MapEntity[],
+): { ok: true } | { ok: false; reason: string } {
+  const others = tileOccupants.filter((o) => o.id !== mover.id);
+  if (others.length === 0) return { ok: true };
+  const myFaction = mover.factionId;
+  for (const o of others) {
+    if (!myFaction || !o.factionId || o.factionId !== myFaction) {
+      return { ok: false, reason: "hostile entity blocks the tile" };
+    }
+  }
+  return { ok: true };
+}
+
 export function validateCoord(coord: unknown, bounds?: MapBounds): Coord | null {
   if (!coord || typeof coord !== "object") return null;
   const { x, y, z } = coord as Record<string, unknown>;
