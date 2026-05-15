@@ -245,8 +245,25 @@ addCmd({
 });
 ```
 
-To suppress the bundled `+map` / `+move` (so your command is the only one),
-drop a `config/map.json` next to the plugin:
+To suppress the bundled `+map` / `+move`, configure the plugin in either the
+main engine config or a plugin-local override file.
+
+**Engine config — `config/config.json`** (preferred, deployer-facing):
+
+```json
+{
+  "plugins": {
+    "map": {
+      "defaultCommands": {
+        "map":  true,
+        "move": false
+      }
+    }
+  }
+}
+```
+
+**Plugin-local — `config/map.json`** (defaults the plugin ships with):
 
 ```json
 {
@@ -257,13 +274,18 @@ drop a `config/map.json` next to the plugin:
 }
 ```
 
-`true` / missing = register; `false` = skip. The rest of the extension API
-stays live regardless. Precedence (high → low) for the toggle:
+`true` / missing = register; `false` = skip. Engine config wins per-key over
+the local file, so operators always have the final say without touching the
+plugin's repo. The rest of the extension API stays live regardless of these
+toggles.
+
+Precedence (high → low):
 
 1. explicit `opts`: `registerDefaultCommands({ move: false })`
-2. env var `URSAMU_MAP_DISABLE_DEFAULT_COMMANDS=1` (disables both — useful for tests / CI)
-3. `config/map.json` `defaultCommands` block
-4. defaults (both register)
+2. env var `URSAMU_MAP_DISABLE_DEFAULT_COMMANDS=1` (kills both — useful for tests / CI)
+3. engine config `plugins.map.defaultCommands` in `config/config.json`
+4. plugin-local `config/map.json`
+5. hardcoded defaults (both register)
 
 Emitted events (via `gameHooks`):
 
