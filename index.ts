@@ -17,6 +17,9 @@ import "./commands.ts";
 export {
   E,
   type DirectionDelta,
+  entityStep,
+  type EntityStepOptions,
+  type EntityStepResult,
   type GuardResult,
   type MoveContext,
   type MoveGuard,
@@ -29,10 +32,17 @@ export {
   runMoveGuards,
   S,
   SE,
+  STEP_DIRECTIONS,
   SW,
   unregisterMoveGuard,
   W,
 } from "./move.ts";
+
+export { registerDefaultCommands } from "./commands.ts";
+
+// Re-export helpers siblings need when building custom commands.
+export { getActiveEntity, getEntity, moveEntity, setEntity } from "./entities.ts";
+export { getOverlay, getOverlaysInRegion, setOverlay, clearOverlay } from "./state.ts";
 
 export {
   type InfoLineFn,

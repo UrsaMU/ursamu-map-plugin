@@ -5,7 +5,6 @@ import { addCmd, DBO } from "ursamu";
 import type { IDBObj, IUrsamuSDK } from "ursamu";
 import {
   CONTROLLING_STATE_FIELD,
-  type Coord,
   MAP_CAPABLE_FLAG,
   OVERLAY_COLLECTION,
   SPECTATING_STATE_FIELD,
@@ -22,7 +21,6 @@ import { getOverlay } from "./state.ts";
 import {
   destroyEntity,
   getActiveEntity,
-  getEntitiesInRegion,
   getEntity,
   moveEntity,
   setEntity,
@@ -30,14 +28,11 @@ import {
 import {
   canClaimEntity,
   canPilot,
-  canStackWith,
-  isInBounds,
   parseCoord,
   validateCoord,
 } from "./commands_internals.ts";
 import { defaultMapConfig } from "./config.default.ts";
-import { getTopologyEngine } from "./mapconfig.ts";
-import { runMoveGuards } from "./move.ts";
+import { entityStep, STEP_DIRECTIONS } from "./move.ts";
 
 const HELP = `+map[/<switch>] [<args>]  — Procedural sector map & movement.
 
@@ -63,17 +58,6 @@ Examples:
   +map/jump 120 -40             Admin: jump your entity to (120,-40,0).
   +map/link entity-42           Take remote control of entity-42.
   +move ne                      Move one tile northeast.`;
-
-const DIRECTIONS: Record<string, { dx: number; dy: number }> = {
-  n: { dx: 0, dy: 1 }, north: { dx: 0, dy: 1 },
-  s: { dx: 0, dy: -1 }, south: { dx: 0, dy: -1 },
-  e: { dx: 1, dy: 0 }, east: { dx: 1, dy: 0 },
-  w: { dx: -1, dy: 0 }, west: { dx: -1, dy: 0 },
-  ne: { dx: 1, dy: 1 }, northeast: { dx: 1, dy: 1 },
-  nw: { dx: -1, dy: 1 }, northwest: { dx: -1, dy: 1 },
-  se: { dx: 1, dy: -1 }, southeast: { dx: 1, dy: -1 },
-  sw: { dx: -1, dy: -1 }, southwest: { dx: -1, dy: -1 },
-};
 
 function isAdmin(u: IUrsamuSDK): boolean {
   return u.me.flags.has("admin") || u.me.flags.has("wizard") ||
@@ -312,89 +296,87 @@ async function handleStats(u: IUrsamuSDK): Promise<void> {
   );
 }
 
-addCmd({
-  name: "+map",
-  pattern: /^\+map(?:\/(\S+))?\s*(.*)/i,
-  lock: "connected",
-  category: "Map",
-  help: HELP,
-  exec: async (u: IUrsamuSDK) => {
-    const sw = (u.cmd.args[0] ?? "").toLowerCase().trim();
-    const rest = u.util.stripSubs(u.cmd.args[1] ?? "").trim();
+let registered = false;
 
-    if (!sw || sw === "here") return await handleHere(u);
-    if (sw === "jump") return await handleJump(u, rest);
-    if (sw === "embark") return await handleEmbark(u, rest);
-    if (sw === "disembark") return await handleDisembark(u);
-    if (sw === "launch") return await handleLaunch(u);
-    if (sw === "land") return await handleLand(u);
-    if (sw === "link") return handleLink(u, rest);
-    if (sw === "unlink") return handleUnlink(u);
-    if (sw === "spectate") return handleSpectate(u, rest);
-    if (sw === "unspectate") return handleUnspectate(u);
-    if (sw === "stats") return handleStats(u);
+/**
+ * Register the bundled `+map` and `+move` commands. Called from `init()` by
+ * default; siblings can suppress them by setting
+ * `URSAMU_MAP_DISABLE_DEFAULT_COMMANDS=1` in the environment, then register
+ * their own commands using `entityStep` + the rest of the extension API.
+ *
+ * Safe to call repeatedly — second + later calls are no-ops.
+ */
+export function registerDefaultCommands(): void {
+  if (registered) return;
+  registered = true;
 
-    u.send(`%crUnknown switch "/${sw}". See +help map.%cn`);
-  },
-});
+  addCmd({
+    name: "+map",
+    pattern: /^\+map(?:\/(\S+))?\s*(.*)/i,
+    lock: "connected",
+    category: "Map",
+    help: HELP,
+    exec: async (u: IUrsamuSDK) => {
+      const sw = (u.cmd.args[0] ?? "").toLowerCase().trim();
+      const rest = u.util.stripSubs(u.cmd.args[1] ?? "").trim();
 
-addCmd({
-  name: "+move",
-  pattern: /^\+move\s+(\S+)/i,
-  lock: "connected",
-  category: "Map",
-  help: "+move <dir> — Move your active entity one tile. See +help map.",
-  exec: async (u: IUrsamuSDK) => {
-    const raw = u.util.stripSubs(u.cmd.args[0] ?? "").toLowerCase().trim();
-    const dir = DIRECTIONS[raw];
-    if (!dir) {
-      u.send(`%crCannot move ${raw}: unknown direction.%cn`);
-      return;
-    }
-    const active = await getActiveEntity(u);
-    if (!active) {
-      u.send(noActiveMsg());
-      return;
-    }
-    const cur = active.entity.coord;
-    const dest: Coord = { x: cur.x + dir.dx, y: cur.y + dir.dy, z: cur.z };
-    if (cur.realm !== undefined) dest.realm = cur.realm;
-    if (!isInBounds(dest, defaultMapConfig.bounds)) {
-      u.send(`%crCannot move ${raw}: out of bounds.%cn`);
-      return;
-    }
-    const ov = await getOverlay(dest);
-    if (ov?.blocksMovement === true) {
-      u.send(`%crCannot move ${raw}: tile blocks movement.%cn`);
-      return;
-    }
-    const occupants = await getEntitiesInRegion({ ...dest }, { ...dest });
-    const stack = canStackWith(active.entity, occupants);
-    if (!stack.ok) {
-      u.send(`%crCannot move ${raw}: ${stack.reason}.%cn`);
-      return;
-    }
-    // Run any registered move-guards. Siblings can veto an entity move with
-    // a reason (encumbrance, locked doors, faction permissions, ICE).
-    const realm = cur.realm ?? "default";
-    const topo = getTopologyEngine(realm);
-    const destBiome = ov?.biome
-      ? (defaultMapConfig.biomes.find((b) => b.id === ov.biome) ??
-        topo.sample(dest).biome)
-      : topo.sample(dest).biome;
-    const guardResult = await runMoveGuards({
-      u,
-      playerId: active.entity.controllerId ?? active.entity.id,
-      from: cur,
-      to: dest,
-      biome: destBiome,
-      cost: 1,
-    });
-    if (!guardResult.allow) {
-      u.send(`%crCannot move ${raw}: ${guardResult.reason}.%cn`);
-      return;
-    }
-    await moveEntity(active.entity.id, dest);
-    u.send(`%cg${active.entity.name} moves ${raw} to (${dest.x}, ${dest.y}, ${dest.z}).%cn`);
-  },
-});
+      if (!sw || sw === "here") return await handleHere(u);
+      if (sw === "jump") return await handleJump(u, rest);
+      if (sw === "embark") return await handleEmbark(u, rest);
+      if (sw === "disembark") return await handleDisembark(u);
+      if (sw === "launch") return await handleLaunch(u);
+      if (sw === "land") return await handleLand(u);
+      if (sw === "link") return handleLink(u, rest);
+      if (sw === "unlink") return handleUnlink(u);
+      if (sw === "spectate") return handleSpectate(u, rest);
+      if (sw === "unspectate") return handleUnspectate(u);
+      if (sw === "stats") return handleStats(u);
+
+      u.send(`%crUnknown switch "/${sw}". See +help map.%cn`);
+    },
+  });
+
+  addCmd({
+    name: "+move",
+    pattern: /^\+move\s+(\S+)/i,
+    lock: "connected",
+    category: "Map",
+    help: "+move <dir> — Move your active entity one tile. See +help map.",
+    exec: async (u: IUrsamuSDK) => {
+      const raw = u.util.stripSubs(u.cmd.args[0] ?? "").toLowerCase().trim();
+      const dir = STEP_DIRECTIONS[raw];
+      if (!dir) {
+        u.send(`%crCannot move ${raw}: unknown direction.%cn`);
+        return;
+      }
+      const active = await getActiveEntity(u);
+      if (!active) {
+        u.send(noActiveMsg());
+        return;
+      }
+      const result = await entityStep(u, active.entity, dir);
+      if (!result.ok) {
+        const reasonMap: Record<string, string> = {
+          bounds: "out of bounds",
+          impassable: "tile is impassable",
+          overlay: "tile blocks movement",
+        };
+        const detail = result.reason ?? reasonMap[result.blocked] ?? result.blocked;
+        u.send(`%crCannot move ${raw}: ${detail}.%cn`);
+        return;
+      }
+      u.send(`%cg${result.entity.name} moves ${raw} to (${result.to.x}, ${result.to.y}, ${result.to.z}).%cn`);
+    },
+  });
+}
+
+// Auto-register at module load unless the env var opts out. Siblings building
+// their own command names should set URSAMU_MAP_DISABLE_DEFAULT_COMMANDS=1.
+const skipDefaults = (() => {
+  try {
+    return Deno.env.get("URSAMU_MAP_DISABLE_DEFAULT_COMMANDS") === "1";
+  } catch {
+    return false;
+  }
+})();
+if (!skipDefaults) registerDefaultCommands();

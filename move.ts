@@ -6,10 +6,12 @@
 import { gameHooks } from "ursamu";
 import type { IUrsamuSDK } from "ursamu";
 
-import type { BiomeDefinition, Coord } from "./schemas.ts";
+import type { BiomeDefinition, Coord, MapBounds, MapEntity } from "./schemas.ts";
 import { defaultMapConfig } from "./config.default.ts";
 import { createTopologyEngine, type TopologyEngine } from "./topology.ts";
 import { getOverlay, setPlayerCoord } from "./state.ts";
+import { canStackWith, isInBounds } from "./commands_internals.ts";
+import { getEntitiesInRegion, moveEntity } from "./entities.ts";
 
 // ─── Direction constants ─────────────────────────────────────────────────────
 //
@@ -239,4 +241,124 @@ function emit<K extends keyof MoveHookPayloads>(
   } catch (err) {
     console.error(`[map-plugin] gameHooks.emit ${name} failed:`, err);
   }
+}
+
+// ─── entityStep: full entity-driven movement primitive ─────────────────────
+//
+// `moveCoord` operates on player coords; this is the entity analog and the
+// engine behind `+move`. Sibling plugins can build their own movement command
+// names ("go", "drive", "pilot", "rush") by calling entityStep with the
+// active entity + a direction or destination.
+
+/**
+ * User-facing direction parse map for compass / cardinal commands.
+ * Convention: north = +y (matches screen-up in the renderer).
+ *
+ * NOTE: the bare-letter exports `N`, `S`, `E`, ... in this module follow the
+ * **topology** convention (north = -y) for parity with `topology.ts`'s
+ * RING_OFFSETS. Use STEP_DIRECTIONS for user-facing direction parsing.
+ */
+export const STEP_DIRECTIONS: Record<string, DirectionDelta> = {
+  n: { dx: 0, dy: 1 }, north: { dx: 0, dy: 1 },
+  s: { dx: 0, dy: -1 }, south: { dx: 0, dy: -1 },
+  e: { dx: 1, dy: 0 }, east: { dx: 1, dy: 0 },
+  w: { dx: -1, dy: 0 }, west: { dx: -1, dy: 0 },
+  ne: { dx: 1, dy: 1 }, northeast: { dx: 1, dy: 1 },
+  nw: { dx: -1, dy: 1 }, northwest: { dx: -1, dy: 1 },
+  se: { dx: 1, dy: -1 }, southeast: { dx: 1, dy: -1 },
+  sw: { dx: -1, dy: -1 }, southwest: { dx: -1, dy: -1 },
+};
+
+export interface EntityStepOptions {
+  /** Bounds to enforce. Defaults to `defaultMapConfig.bounds` if unset. */
+  bounds?: MapBounds | null;
+  /** Inject a TopologyEngine (defaults to defaultMapConfig's). */
+  topology?: TopologyEngine;
+  /** When true, run guards + cost resolution but skip the DB write. */
+  dryRun?: boolean;
+}
+
+export type EntityStepResult =
+  | { ok: true; entity: MapEntity; from: Coord; to: Coord; cost: number; biome: BiomeDefinition }
+  | { ok: false; blocked: string; reason?: string; from: Coord; to: Coord; biome: BiomeDefinition; cost: number };
+
+/**
+ * Single-step entity movement with full validation pipeline:
+ *   1. resolve destination (delta or coord)
+ *   2. config bounds
+ *   3. overlay.blocksMovement
+ *   4. occupant stacking (canStackWith)
+ *   5. impassable biome
+ *   6. registered move-guards (first veto wins)
+ *   7. moveEntity + emit `map:player:moved`
+ *
+ * Returns a structured result so callers (custom commands) can render their
+ * own user-facing messages and decide whether to charge action points.
+ */
+export async function entityStep(
+  u: IUrsamuSDK,
+  entity: MapEntity,
+  deltaOrCoord: DirectionDelta | Coord,
+  opts: EntityStepOptions = {},
+): Promise<EntityStepResult> {
+  const from = entity.coord;
+  const to: Coord = "x" in deltaOrCoord
+    ? { ...deltaOrCoord }
+    : ((): Coord => {
+      const next: Coord = { x: from.x + deltaOrCoord.dx, y: from.y + deltaOrCoord.dy, z: from.z };
+      if (from.realm !== undefined) next.realm = from.realm;
+      return next;
+    })();
+
+  const topo = opts.topology ?? createTopologyEngine(defaultMapConfig);
+  const overlay = await getOverlay(to);
+  let biome: BiomeDefinition;
+  if (overlay?.biome) {
+    biome = defaultMapConfig.biomes.find((b) => b.id === overlay.biome) ?? topo.sample(to).biome;
+  } else {
+    biome = topo.sample(to).biome;
+  }
+  const traversal = biome.traversal;
+  const baseCost = traversal ? TRAVERSAL_COST[traversal] : 1;
+
+  const bounds = opts.bounds === undefined ? defaultMapConfig.bounds : (opts.bounds ?? undefined);
+  if (!isInBounds(to, bounds)) {
+    emit("map:player:blocked", { playerId: entity.controllerId ?? entity.id, from, to, reason: "bounds", biome });
+    return { ok: false, blocked: "bounds", from, to, biome, cost: baseCost };
+  }
+  if (!Number.isFinite(baseCost)) {
+    emit("map:player:blocked", { playerId: entity.controllerId ?? entity.id, from, to, reason: "impassable", biome });
+    return { ok: false, blocked: "impassable", from, to, biome, cost: baseCost };
+  }
+  if (overlay?.blocksMovement === true) {
+    emit("map:player:blocked", { playerId: entity.controllerId ?? entity.id, from, to, reason: "overlay", biome });
+    return { ok: false, blocked: "overlay", from, to, biome, cost: baseCost };
+  }
+
+  const occupants = await getEntitiesInRegion({ ...to }, { ...to });
+  const stack = canStackWith(entity, occupants);
+  if (!stack.ok) {
+    emit("map:player:blocked", { playerId: entity.controllerId ?? entity.id, from, to, reason: stack.reason, biome });
+    return { ok: false, blocked: "stack", reason: stack.reason, from, to, biome, cost: baseCost };
+  }
+
+  const guardResult = await runMoveGuards({
+    u,
+    playerId: entity.controllerId ?? entity.id,
+    from,
+    to,
+    biome,
+    cost: baseCost,
+  });
+  if (!guardResult.allow) {
+    return { ok: false, blocked: "guard", reason: guardResult.reason, from, to, biome, cost: baseCost };
+  }
+
+  let moved: MapEntity = entity;
+  if (!opts.dryRun) moved = await moveEntity(entity.id, to);
+  emit("map:player:moved", {
+    playerId: entity.controllerId ?? entity.id,
+    from, to, biome, cost: baseCost,
+  });
+  return { ok: true, entity: moved, from, to, cost: baseCost, biome };
 }
