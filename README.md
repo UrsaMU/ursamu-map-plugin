@@ -213,6 +213,44 @@ const result = await moveCoord(u, playerId, currentCoord, N);
 `+move` runs the same guard chain via `runMoveGuards(ctx)`, so guards fire
 on both player- and entity-driven moves.
 
+### Building your own movement commands
+
+If `+move` doesn't fit your game ("go", "drive", "pilot", "rush", "jump"),
+register your own command and use `entityStep` as the engine. It runs the
+full validation pipeline (bounds, overlay block, occupant stacking,
+impassable, guards) and emits the same `map:player:moved` /
+`map:player:blocked` events as the built-in.
+
+```ts
+import { addCmd } from "ursamu";
+import {
+  entityStep,
+  getActiveEntity,
+  STEP_DIRECTIONS,
+} from "@ursamu/map-plugin";
+
+addCmd({
+  name: "drive",
+  pattern: /^drive\s+(\S+)/i,
+  lock: "connected",
+  exec: async (u) => {
+    const dir = STEP_DIRECTIONS[u.cmd.args[0].toLowerCase()];
+    const active = await getActiveEntity(u);
+    if (!dir || !active) return u.send("usage: drive <dir>");
+    const r = await entityStep(u, active.entity, dir);
+    u.send(r.ok
+      ? `Your ${active.entity.name} rolls to (${r.to.x}, ${r.to.y}).`
+      : `Stalled: ${r.reason ?? r.blocked}.`);
+  },
+});
+```
+
+To suppress the bundled `+map` / `+move` (so your command is the only one),
+set `URSAMU_MAP_DISABLE_DEFAULT_COMMANDS=1` in the environment before the
+plugin loads. The rest of the extension API stays live; only the two
+default commands skip registration. If you'd rather register them
+explicitly later, call `registerDefaultCommands()`.
+
 Emitted events (via `gameHooks`):
 
 | Event | Payload | Fires when |

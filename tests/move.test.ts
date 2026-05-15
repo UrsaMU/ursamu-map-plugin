@@ -206,3 +206,64 @@ Deno.test("runMoveGuards: first veto wins and emits map:player:blocked", OPTS, a
   hooks.detach();
   _clearMoveGuards();
 });
+
+import { entityStep, STEP_DIRECTIONS } from "../move.ts";
+import { destroyEntity, setEntity, getEntity } from "../entities.ts";
+import type { MapEntity } from "../schemas.ts";
+
+Deno.test("entityStep: success moves entity and emits map:player:moved", OPTS, async () => {
+  _clearMoveGuards();
+  const hooks = recordHooks();
+  const id = "e-step-1";
+  const e: MapEntity = {
+    id, coord: { x: 0, y: 0, z: 0 }, glyph: "@", kind: "scout",
+    name: "Scout", vision: 4,
+  };
+  await setEntity(e);
+  const u = {} as unknown as IUrsamuSDK;
+
+  const res = await entityStep(u, e, STEP_DIRECTIONS.e, {
+    topology: fakeTopo(biome("grass", "easy")),
+    bounds: null,
+  });
+  assert(res.ok);
+  if (res.ok) {
+    assertEquals(res.to, { x: 1, y: 0, z: 0 });
+    assertEquals(res.entity.coord, { x: 1, y: 0, z: 0 });
+  }
+  const stored = await getEntity(id);
+  assertEquals(stored?.coord, { x: 1, y: 0, z: 0 });
+  assertEquals(hooks.events.filter((h) => h.name === "map:player:moved").length, 1);
+
+  await destroyEntity(id);
+  hooks.detach();
+});
+
+Deno.test("entityStep: guard veto blocks move and surfaces reason", OPTS, async () => {
+  _clearMoveGuards();
+  const hooks = recordHooks();
+  const id = "e-step-2";
+  const e: MapEntity = {
+    id, coord: { x: 5, y: 5, z: 0 }, glyph: "@", kind: "scout",
+    name: "Scout", vision: 4,
+  };
+  await setEntity(e);
+  registerMoveGuard(() => ({ allow: false, reason: "no-fuel" }));
+  const u = {} as unknown as IUrsamuSDK;
+
+  const res = await entityStep(u, e, STEP_DIRECTIONS.n, {
+    topology: fakeTopo(biome("grass", "easy")),
+    bounds: null,
+  });
+  assertEquals(res.ok, false);
+  if (!res.ok) {
+    assertEquals(res.blocked, "guard");
+    assertEquals(res.reason, "no-fuel");
+  }
+  const stored = await getEntity(id);
+  assertEquals(stored?.coord, { x: 5, y: 5, z: 0 });
+
+  await destroyEntity(id);
+  _clearMoveGuards();
+  hooks.detach();
+});
