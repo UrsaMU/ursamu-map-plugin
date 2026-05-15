@@ -33,6 +33,7 @@ import {
 } from "./commands_internals.ts";
 import { defaultMapConfig } from "./config.default.ts";
 import { entityStep, STEP_DIRECTIONS } from "./move.ts";
+import { resolveDefaultCommandToggle } from "./plugin-config.ts";
 
 const HELP = `+map[/<switch>] [<args>]  — Procedural sector map & movement.
 
@@ -296,21 +297,31 @@ async function handleStats(u: IUrsamuSDK): Promise<void> {
   );
 }
 
-let registered = false;
+let mapRegistered = false;
+let moveRegistered = false;
 
 /**
- * Register the bundled `+map` and `+move` commands. Called from `init()` by
- * default; siblings can suppress them by setting
- * `URSAMU_MAP_DISABLE_DEFAULT_COMMANDS=1` in the environment, then register
- * their own commands using `entityStep` + the rest of the extension API.
+ * Register the bundled `+map` / `+move` commands. By default the plugin
+ * auto-registers both at module load; siblings can disable either or both
+ * via:
  *
- * Safe to call repeatedly — second + later calls are no-ops.
+ *   1. Explicit `opts`: `registerDefaultCommands({ move: false })`
+ *   2. Env var `URSAMU_MAP_DISABLE_DEFAULT_COMMANDS=1` (disables both)
+ *   3. `config/map.json`:
+ *      `{ "defaultCommands": { "map": true, "move": false } }`
+ *
+ * Per-command flags are idempotent — registering the same command twice
+ * is a no-op.
  */
-export function registerDefaultCommands(): void {
-  if (registered) return;
-  registered = true;
+export function registerDefaultCommands(opts?: {
+  map?: boolean;
+  move?: boolean;
+}): void {
+  const toggles = resolveDefaultCommandToggle(opts);
 
-  addCmd({
+  if (toggles.map && !mapRegistered) {
+    mapRegistered = true;
+    addCmd({
     name: "+map",
     pattern: /^\+map(?:\/(\S+))?\s*(.*)/i,
     lock: "connected",
@@ -335,48 +346,51 @@ export function registerDefaultCommands(): void {
       u.send(`%crUnknown switch "/${sw}". See +help map.%cn`);
     },
   });
+  }
 
-  addCmd({
-    name: "+move",
-    pattern: /^\+move\s+(\S+)/i,
-    lock: "connected",
-    category: "Map",
-    help: "+move <dir> — Move your active entity one tile. See +help map.",
-    exec: async (u: IUrsamuSDK) => {
-      const raw = u.util.stripSubs(u.cmd.args[0] ?? "").toLowerCase().trim();
-      const dir = STEP_DIRECTIONS[raw];
-      if (!dir) {
-        u.send(`%crCannot move ${raw}: unknown direction.%cn`);
-        return;
-      }
-      const active = await getActiveEntity(u);
-      if (!active) {
-        u.send(noActiveMsg());
-        return;
-      }
-      const result = await entityStep(u, active.entity, dir);
-      if (!result.ok) {
-        const reasonMap: Record<string, string> = {
-          bounds: "out of bounds",
-          impassable: "tile is impassable",
-          overlay: "tile blocks movement",
-        };
-        const detail = result.reason ?? reasonMap[result.blocked] ?? result.blocked;
-        u.send(`%crCannot move ${raw}: ${detail}.%cn`);
-        return;
-      }
-      u.send(`%cg${result.entity.name} moves ${raw} to (${result.to.x}, ${result.to.y}, ${result.to.z}).%cn`);
-    },
-  });
+  if (toggles.move && !moveRegistered) {
+    moveRegistered = true;
+    addCmd({
+      name: "+move",
+      pattern: /^\+move\s+(\S+)/i,
+      lock: "connected",
+      category: "Map",
+      help: "+move <dir> — Move your active entity one tile. See +help map.",
+      exec: async (u: IUrsamuSDK) => {
+        const raw = u.util.stripSubs(u.cmd.args[0] ?? "").toLowerCase().trim();
+        const dir = STEP_DIRECTIONS[raw];
+        if (!dir) {
+          u.send(`%crCannot move ${raw}: unknown direction.%cn`);
+          return;
+        }
+        const active = await getActiveEntity(u);
+        if (!active) {
+          u.send(noActiveMsg());
+          return;
+        }
+        const result = await entityStep(u, active.entity, dir);
+        if (!result.ok) {
+          const reasonMap: Record<string, string> = {
+            bounds: "out of bounds",
+            impassable: "tile is impassable",
+            overlay: "tile blocks movement",
+          };
+          const detail = result.reason ?? reasonMap[result.blocked] ?? result.blocked;
+          u.send(`%crCannot move ${raw}: ${detail}.%cn`);
+          return;
+        }
+        u.send(`%cg${result.entity.name} moves ${raw} to (${result.to.x}, ${result.to.y}, ${result.to.z}).%cn`);
+      },
+    });
+  }
 }
 
-// Auto-register at module load unless the env var opts out. Siblings building
-// their own command names should set URSAMU_MAP_DISABLE_DEFAULT_COMMANDS=1.
-const skipDefaults = (() => {
-  try {
-    return Deno.env.get("URSAMU_MAP_DISABLE_DEFAULT_COMMANDS") === "1";
-  } catch {
-    return false;
-  }
-})();
-if (!skipDefaults) registerDefaultCommands();
+/** Test-only: reset the per-command registration latches. */
+export function _resetDefaultCommandLatches(): void {
+  mapRegistered = false;
+  moveRegistered = false;
+}
+
+// Auto-register at module load. The resolver consults env var + config/map.json
+// internally, so this single call respects all opt-out paths.
+registerDefaultCommands();
