@@ -40,6 +40,13 @@ export {
 
 export { registerDefaultCommands } from "./commands.ts";
 
+export {
+  getPluginConfigSync,
+  invalidatePluginConfigCache,
+  type MapPluginConfig,
+  resolveDefaultCommandToggle,
+} from "./plugin-config.ts";
+
 // Re-export helpers siblings need when building custom commands.
 export { getActiveEntity, getEntity, moveEntity, setEntity } from "./entities.ts";
 export { getOverlay, getOverlaysInRegion, setOverlay, clearOverlay } from "./state.ts";

@@ -246,10 +246,24 @@ addCmd({
 ```
 
 To suppress the bundled `+map` / `+move` (so your command is the only one),
-set `URSAMU_MAP_DISABLE_DEFAULT_COMMANDS=1` in the environment before the
-plugin loads. The rest of the extension API stays live; only the two
-default commands skip registration. If you'd rather register them
-explicitly later, call `registerDefaultCommands()`.
+drop a `config/map.json` next to the plugin:
+
+```json
+{
+  "defaultCommands": {
+    "map":  true,
+    "move": false
+  }
+}
+```
+
+`true` / missing = register; `false` = skip. The rest of the extension API
+stays live regardless. Precedence (high → low) for the toggle:
+
+1. explicit `opts`: `registerDefaultCommands({ move: false })`
+2. env var `URSAMU_MAP_DISABLE_DEFAULT_COMMANDS=1` (disables both — useful for tests / CI)
+3. `config/map.json` `defaultCommands` block
+4. defaults (both register)
 
 Emitted events (via `gameHooks`):
 
