@@ -85,7 +85,7 @@ const runPrune = async (): Promise<void> => {
 
 const mapPlugin: IPlugin = {
   name: "map",
-  version: "1.0.0",
+  version: "3.0.0",
   description: "Procedural sector map with overlay support via DESCFORMAT.",
 
   init: () => {
